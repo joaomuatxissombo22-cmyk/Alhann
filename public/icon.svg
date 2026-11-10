@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="alhanBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B192C" />
+      <stop offset="100%" stop-color="#1E3E62" />
+    </linearGradient>
+    <linearGradient id="alhanAccent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#alhanBg)" />
+  <path d="M148 368L236 144H276L364 368H318L298 312H214L194 368H148ZM228 274H284L256 194L228 274Z" fill="#FFFFFF" />
+  <rect x="148" y="392" width="216" height="16" rx="8" fill="url(#alhanAccent)" />
+</svg>

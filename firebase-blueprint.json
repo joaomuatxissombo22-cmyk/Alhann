@@ -1,0 +1,438 @@
+{
+  "entities": {
+    "Company": {
+      "title": "Company",
+      "description": "Multi-tenant company profile registered on ALHAN FACTURA in Angola.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "commercialName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "nif": { "type": "string", "minLength": 5, "maxLength": 30, "pattern": "^[a-zA-Z0-9]+$" },
+        "address": { "type": "string", "minLength": 2, "maxLength": 250 },
+        "province": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "municipality": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "phone": { "type": "string", "minLength": 5, "maxLength": 40 },
+        "email": { "type": "string", "minLength": 5, "maxLength": 120 },
+        "economicActivity": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "taxRegime": { "type": "string", "enum": ["Regime Geral", "Regime Simplificado", "Regime de Exclusão"] },
+        "vatScheme": { "type": "string", "enum": ["IVA 14% (Geral)", "IVA 7% (Simplificado)", "IVA 5% (Cesta Básica)", "Isento de IVA"] },
+        "responsibleName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "bankName": { "type": "string", "maxLength": 100 },
+        "bankIban": { "type": "string", "maxLength": 60 },
+        "establishmentsCount": { "type": "number" },
+        "planId": { "type": "string", "enum": ["starter", "profissional", "empresarial"] },
+        "billingCycle": { "type": "string", "enum": ["mensal", "trimestral", "semestral", "anual"] },
+        "subscriptionStatus": { "type": "string", "enum": ["activa", "pendente", "vencida", "suspensa"] },
+        "agtStatus": { "type": "string", "enum": ["preparacao_certificacao", "ambiente_testes", "homologacao_pendente"] },
+        "agtCertificateRef": { "type": "string", "maxLength": 120 },
+        "agtEnvironment": { "type": "string", "enum": ["sandbox_teste", "producao_bloqueada"] },
+        "logoUrl": { "type": "string", "maxLength": 45000 },
+        "subscriptionStartDate": { "type": "string", "maxLength": 40 },
+        "subscriptionEndDate": { "type": "string", "maxLength": 40 },
+        "agtAdhesionStatus": { "type": "string", "enum": ["nao_aderente", "em_homologacao", "aderente_activo"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "name", "commercialName", "nif", "address", "province", "municipality",
+        "phone", "email", "economicActivity", "taxRegime", "vatScheme", "responsibleName",
+        "bankName", "bankIban", "establishmentsCount", "planId", "billingCycle",
+        "subscriptionStatus", "agtStatus", "agtCertificateRef", "agtEnvironment",
+        "createdAt", "updatedAt"
+      ]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Individual or corporate customer of an Angolan company.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clientType": { "type": "string", "enum": ["empresarial", "particular"] },
+        "name": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "nif": { "type": "string", "minLength": 5, "maxLength": 30 },
+        "address": { "type": "string", "maxLength": 250 },
+        "province": { "type": "string", "maxLength": 80 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "email": { "type": "string", "maxLength": 120 },
+        "contactPerson": { "type": "string", "maxLength": 120 },
+        "creditLimit": { "type": "number" },
+        "currentBalance": { "type": "number" },
+        "totalInvoiced": { "type": "number" },
+        "totalPaid": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "companyId", "clientType", "name", "nif", "address", "province",
+        "phone", "email", "contactPerson", "creditLimit", "currentBalance",
+        "totalInvoiced", "totalPaid", "createdAt", "updatedAt"
+      ]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Commercial product or service with tax rate and warehouse stock.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "itemType": { "type": "string", "enum": ["produto", "servico"] },
+        "code": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "barcode": { "type": "string", "maxLength": 60 },
+        "description": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 80 },
+        "purchasePrice": { "type": "number" },
+        "salePrice": { "type": "number" },
+        "unit": { "type": "string", "maxLength": 20 },
+        "taxRate": { "type": "number" },
+        "taxExemptionReason": { "type": "string", "maxLength": 160 },
+        "stock": { "type": "number" },
+        "minStock": { "type": "number" },
+        "warehouse": { "type": "string", "maxLength": 80 },
+        "profitMargin": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "companyId", "itemType", "code", "barcode", "description",
+        "category", "purchasePrice", "salePrice", "unit", "taxRate", "taxExemptionReason",
+        "stock", "minStock", "warehouse", "profitMargin", "createdAt", "updatedAt"
+      ]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Fiscal or commercial document issued under Decreto Presidencial 71/25.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "docType": {
+          "type": "string",
+          "enum": [
+            "Factura", "Factura-Recibo", "Factura Proforma", "Recibo",
+            "Nota de Credito", "Nota de Debito", "Orcamento",
+            "Guia de Remessa", "Guia de Transporte", "Aviso de Cobranca", "Factura Global"
+          ]
+        },
+        "series": { "type": "string", "minLength": 2, "maxLength": 30 },
+        "sequentialNumber": { "type": "number" },
+        "docNumber": { "type": "string", "minLength": 3, "maxLength": 50 },
+        "issueDate": { "type": "string", "maxLength": 40 },
+        "dueDate": { "type": "string", "maxLength": 40 },
+        "emitterName": { "type": "string", "maxLength": 160 },
+        "emitterNif": { "type": "string", "maxLength": 30 },
+        "clientId": { "type": "string", "maxLength": 128 },
+        "clientName": { "type": "string", "maxLength": 160 },
+        "clientNif": { "type": "string", "maxLength": 30 },
+        "clientAddress": { "type": "string", "maxLength": 250 },
+        "itemsSummary": { "type": "string", "maxLength": 2000 },
+        "subtotal": { "type": "number" },
+        "discountTotal": { "type": "number" },
+        "taxTotal": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "amountInWords": { "type": "string", "maxLength": 300 },
+        "paymentTerms": { "type": "string", "maxLength": 100 },
+        "paymentMethod": { "type": "string", "maxLength": 60 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "qrCodePayload": { "type": "string", "maxLength": 600 },
+        "hashCode": { "type": "string", "maxLength": 128 },
+        "softwareCertText": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["emitida", "paga", "pendente", "vencida", "rectificada"] },
+        "paidAmount": { "type": "number" },
+        "printCount": { "type": "number" },
+        "agtTransmissionStatus": {
+          "type": "string",
+          "enum": [
+            "rascunho", "pendente_transmissao", "recebida_agt", "em_processamento",
+            "validada", "rejeitada", "erro_comunicacao", "preparacao_certificacao",
+            "pendente_envio", "contingencia", "registado_local"
+          ]
+        },
+        "agtOperationId": { "type": "string", "maxLength": 120 },
+        "agtResponseJson": { "type": "string", "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "companyId", "docType", "series", "sequentialNumber", "docNumber",
+        "issueDate", "dueDate", "emitterName", "emitterNif", "clientId", "clientName",
+        "clientNif", "clientAddress", "itemsSummary", "subtotal", "discountTotal",
+        "taxTotal", "totalAmount", "amountInWords", "paymentTerms", "paymentMethod",
+        "notes", "qrCodePayload", "hashCode", "softwareCertText", "status",
+        "paidAmount", "printCount", "agtTransmissionStatus", "createdAt", "updatedAt"
+      ]
+    },
+    "InventoryMovement": {
+      "title": "InventoryMovement",
+      "description": "Stock entry, exit, transfer, return, or adjustment record.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "productId": { "type": "string", "maxLength": 128 },
+        "productName": { "type": "string", "maxLength": 200 },
+        "movementType": { "type": "string", "enum": ["entrada", "saida", "transferencia", "devolucao", "ajuste"] },
+        "quantity": { "type": "number" },
+        "warehouseOrigin": { "type": "string", "maxLength": 80 },
+        "warehouseDest": { "type": "string", "maxLength": 80 },
+        "unitCost": { "type": "number" },
+        "referenceDoc": { "type": "string", "maxLength": 80 },
+        "notes": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "companyId", "productId", "productName", "movementType", "quantity",
+        "warehouseOrigin", "warehouseDest", "unitCost", "referenceDoc", "notes",
+        "createdAt", "updatedAt"
+      ]
+    },
+    "FinancialTransaction": {
+      "title": "FinancialTransaction",
+      "description": "Receipt, expense, supplier payment, or cash/bank movement.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "txType": { "type": "string", "enum": ["recebimento", "despesa", "pagamento_fornecedor", "transferencia_caixa"] },
+        "category": { "type": "string", "maxLength": 80 },
+        "description": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["transferencia", "numerario", "pos", "multicaixa_express", "referencia"] },
+        "accountName": { "type": "string", "maxLength": 100 },
+        "referenceDoc": { "type": "string", "maxLength": 80 },
+        "entityName": { "type": "string", "maxLength": 160 },
+        "status": { "type": "string", "enum": ["liquidado", "pendente", "reconciliado"] },
+        "txDate": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "companyId", "txType", "category", "description", "amount",
+        "paymentMethod", "accountName", "referenceDoc", "entityName", "status",
+        "txDate", "createdAt", "updatedAt"
+      ]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Supplier and purchase control record.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "nif": { "type": "string", "minLength": 5, "maxLength": 30 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "email": { "type": "string", "maxLength": 120 },
+        "address": { "type": "string", "maxLength": 250 },
+        "category": { "type": "string", "maxLength": 80 },
+        "totalPurchased": { "type": "number" },
+        "balanceDue": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "companyId", "name", "nif", "phone", "email", "address",
+        "category", "totalPurchased", "balanceDue", "createdAt", "updatedAt"
+      ]
+    },
+    "TeamMember": {
+      "title": "TeamMember",
+      "description": "Company operator/user with role-based permissions.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "email": { "type": "string", "minLength": 5, "maxLength": 120 },
+        "role": {
+          "type": "string",
+          "enum": [
+            "Administrador", "Gerente", "Contabilista",
+            "Operador de facturacao", "Vendedor", "Responsavel de armazem", "Consulta"
+          ]
+        },
+        "establishment": { "type": "string", "maxLength": 100 },
+        "permissionsSummary": { "type": "string", "maxLength": 300 },
+        "status": { "type": "string", "enum": ["activo", "suspenso"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "companyId", "name", "email", "role", "establishment",
+        "permissionsSummary", "status", "createdAt", "updatedAt"
+      ]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "Customer technical support ticket managed by ALHAN.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyName": { "type": "string", "maxLength": 160 },
+        "subject": { "type": "string", "minLength": 3, "maxLength": 160 },
+        "description": { "type": "string", "minLength": 5, "maxLength": 1500 },
+        "category": { "type": "string", "maxLength": 80 },
+        "priority": { "type": "string", "enum": ["baixa", "media", "alta", "urgente"] },
+        "attachmentRef": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["aberto", "em_analise", "respondido", "fechado"] },
+        "adminResponse": { "type": "string", "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "companyId", "companyName", "subject", "description", "category",
+        "priority", "attachmentRef", "status", "adminResponse", "createdAt", "updatedAt"
+      ]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable operational and fiscal audit trail.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorEmail": { "type": "string", "maxLength": 120 },
+        "actorRole": { "type": "string", "maxLength": 60 },
+        "action": { "type": "string", "maxLength": 120 },
+        "module": { "type": "string", "maxLength": 60 },
+        "targetRef": { "type": "string", "maxLength": 120 },
+        "details": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "companyId", "actorEmail", "actorRole", "action",
+        "module", "targetRef", "details", "createdAt"
+      ]
+    },
+    "SubscriptionPayment": {
+      "title": "SubscriptionPayment",
+      "description": "Multicaixa Express subscription payment order and proof validation record.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyName": { "type": "string", "maxLength": 160 },
+        "companyNif": { "type": "string", "maxLength": 30 },
+        "planId": { "type": "string", "enum": ["starter", "profissional", "empresarial"] },
+        "billingCycle": { "type": "string", "enum": ["mensal", "trimestral", "semestral", "anual"] },
+        "amountKz": { "type": "number" },
+        "mcxChannelNumber": { "type": "string", "maxLength": 30 },
+        "beneficiaryName": { "type": "string", "maxLength": 60 },
+        "orderReference": { "type": "string", "maxLength": 80 },
+        "transactionReference": { "type": "string", "maxLength": 120 },
+        "paymentModality": { "type": "string", "enum": ["automatico_emis", "confirmacao_administrativa"] },
+        "proofFileName": { "type": "string", "maxLength": 160 },
+        "proofDataUrl": { "type": "string", "maxLength": 60000 },
+        "paymentDeadline": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["pendente", "confirmado", "rejeitado", "novo_comprovativo"] },
+        "adminNotes": { "type": "string", "maxLength": 1000 },
+        "receiptNumber": { "type": "string", "maxLength": 80 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "companyId", "companyName", "companyNif", "planId", "billingCycle",
+        "amountKz", "mcxChannelNumber", "beneficiaryName", "orderReference",
+        "transactionReference", "paymentModality", "proofFileName", "proofDataUrl",
+        "paymentDeadline", "status", "adminNotes", "receiptNumber", "createdAt", "updatedAt"
+      ]
+    },
+    "AgtCommunicationLog": {
+      "title": "AgtCommunicationLog",
+      "description": "Immutable log of AGT electronic invoicing service requests and JWS responses.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "serviceName": {
+          "type": "string",
+          "enum": [
+            "registarFactura", "obterEstado", "listarFacturas",
+            "consultarFactura", "solicitarSerie", "listarSeries", "validarDocumento"
+          ]
+        },
+        "environment": { "type": "string", "enum": ["homologacao", "producao"] },
+        "targetRef": { "type": "string", "maxLength": 120 },
+        "jwsHeaderSummary": { "type": "string", "maxLength": 600 },
+        "requestPayloadSummary": { "type": "string", "maxLength": 1000 },
+        "responsePayloadSummary": { "type": "string", "maxLength": 1000 },
+        "httpStatus": { "type": "number" },
+        "resultStatus": { "type": "string", "maxLength": 40 },
+        "operationId": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "companyId", "serviceName", "environment", "targetRef",
+        "jwsHeaderSummary", "requestPayloadSummary", "responsePayloadSummary",
+        "httpStatus", "resultStatus", "operationId", "createdAt"
+      ]
+    },
+    "AdminProfile": {
+      "title": "AdminProfile",
+      "description": "Central ALHAN platform administrator marker.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/companies/{companyId}": {
+      "schema": { "$ref": "#/entities/Company" },
+      "description": "Registered tenant companies."
+    },
+    "/clients/{clientId}": {
+      "schema": { "$ref": "#/entities/Client" },
+      "description": "Tenant customers and current account balances."
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Tenant products and services catalog."
+    },
+    "/invoices/{invoiceId}": {
+      "schema": { "$ref": "#/entities/Invoice" },
+      "description": "Issued fiscal and commercial documents (immutable fiscal core)."
+    },
+    "/inventory_movements/{movementId}": {
+      "schema": { "$ref": "#/entities/InventoryMovement" },
+      "description": "Warehouse stock movements."
+    },
+    "/financial_transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/FinancialTransaction" },
+      "description": "Receipts, expenses, and cash/bank transactions."
+    },
+    "/suppliers/{supplierId}": {
+      "schema": { "$ref": "#/entities/Supplier" },
+      "description": "Suppliers and purchase ledger."
+    },
+    "/team_members/{memberId}": {
+      "schema": { "$ref": "#/entities/TeamMember" },
+      "description": "Company users and role permissions."
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/SupportTicket" },
+      "description": "Technical support tickets."
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Append-only security and operation logs."
+    },
+    "/subscription_payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/SubscriptionPayment" },
+      "description": "Multicaixa Express subscription payments and proof validations."
+    },
+    "/agt_communications/{commId}": {
+      "schema": { "$ref": "#/entities/AgtCommunicationLog" },
+      "description": "AGT electronic invoicing communication audit logs."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminProfile" },
+      "description": "Central ALHAN administrators."
+    }
+  }
+}

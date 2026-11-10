@@ -1,0 +1,785 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Zero-lookup admin check safe for list queries (Cost-Optimization Clause)
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'joaomuatxissombo22@gmail.com';
+    }
+
+    // Full admin check for single-document operations
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Relational Master Gate: Verify parent company exists and belongs to the authenticated user
+    function ownsParentCompany(companyId) {
+      return isValidId(companyId) &&
+        exists(/databases/$(database)/documents/companies/$(companyId)) &&
+        get(/databases/$(database)/documents/companies/$(companyId)).data.ownerId == request.auth.uid;
+    }
+
+    // 3. Entity Validation Blueprints (Anti-Update-Gap)
+
+    function isValidCompany(data) {
+      return data.keys().hasAll([
+        'ownerId', 'name', 'commercialName', 'nif', 'address', 'province', 'municipality',
+        'phone', 'email', 'economicActivity', 'taxRegime', 'vatScheme', 'responsibleName',
+        'bankName', 'bankIban', 'establishmentsCount', 'planId', 'billingCycle',
+        'subscriptionStatus', 'agtStatus', 'agtCertificateRef', 'agtEnvironment',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'name', 'commercialName', 'nif', 'address', 'province', 'municipality',
+        'phone', 'email', 'economicActivity', 'taxRegime', 'vatScheme', 'responsibleName',
+        'bankName', 'bankIban', 'establishmentsCount', 'planId', 'billingCycle',
+        'subscriptionStatus', 'agtStatus', 'agtCertificateRef', 'agtEnvironment',
+        'logoUrl', 'subscriptionStartDate', 'subscriptionEndDate', 'agtAdhesionStatus',
+        'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.ownerId) &&
+      data.name is string && data.name.size() >= 2 && data.name.size() <= 160 &&
+      data.commercialName is string && data.commercialName.size() >= 1 && data.commercialName.size() <= 160 &&
+      data.nif is string && data.nif.size() >= 5 && data.nif.size() <= 30 && data.nif.matches('^[a-zA-Z0-9]+$') &&
+      data.address is string && data.address.size() >= 2 && data.address.size() <= 250 &&
+      data.province is string && data.province.size() >= 2 && data.province.size() <= 80 &&
+      data.municipality is string && data.municipality.size() >= 2 && data.municipality.size() <= 80 &&
+      data.phone is string && data.phone.size() >= 5 && data.phone.size() <= 40 &&
+      data.email is string && data.email.size() >= 5 && data.email.size() <= 120 &&
+      data.economicActivity is string && data.economicActivity.size() >= 2 && data.economicActivity.size() <= 160 &&
+      data.taxRegime is string && data.taxRegime.size() <= 60 &&
+      data.taxRegime in ['Regime Geral', 'Regime Simplificado', 'Regime de Exclusão'] &&
+      data.vatScheme is string && data.vatScheme.size() <= 60 &&
+      data.vatScheme in ['IVA 14% (Geral)', 'IVA 7% (Simplificado)', 'IVA 5% (Cesta Básica)', 'Isento de IVA'] &&
+      data.responsibleName is string && data.responsibleName.size() >= 2 && data.responsibleName.size() <= 120 &&
+      data.bankName is string && data.bankName.size() <= 100 &&
+      data.bankIban is string && data.bankIban.size() <= 60 &&
+      data.establishmentsCount is number && data.establishmentsCount >= 1 && data.establishmentsCount <= 500 &&
+      data.planId is string && data.planId.size() <= 30 && data.planId in ['starter', 'profissional', 'empresarial'] &&
+      data.billingCycle is string && data.billingCycle.size() <= 30 && data.billingCycle in ['mensal', 'trimestral', 'semestral', 'anual'] &&
+      data.subscriptionStatus is string && data.subscriptionStatus.size() <= 30 && data.subscriptionStatus in ['activa', 'pendente', 'vencida', 'suspensa'] &&
+      data.agtStatus is string && data.agtStatus.size() <= 40 && data.agtStatus in ['preparacao_certificacao', 'ambiente_testes', 'homologacao_pendente'] &&
+      data.agtCertificateRef is string && data.agtCertificateRef.size() <= 120 &&
+      data.agtEnvironment is string && data.agtEnvironment.size() <= 40 && data.agtEnvironment in ['sandbox_teste', 'producao_bloqueada'] &&
+      (!('logoUrl' in data) || (data.logoUrl is string && data.logoUrl.size() <= 45000)) &&
+      (!('subscriptionStartDate' in data) || (data.subscriptionStartDate is string && data.subscriptionStartDate.size() <= 40)) &&
+      (!('subscriptionEndDate' in data) || (data.subscriptionEndDate is string && data.subscriptionEndDate.size() <= 40)) &&
+      (!('agtAdhesionStatus' in data) || (data.agtAdhesionStatus is string && data.agtAdhesionStatus.size() <= 40 && data.agtAdhesionStatus in ['nao_aderente', 'em_homologacao', 'aderente_activo'])) &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidClient(data) {
+      return data.keys().hasAll([
+        'ownerId', 'companyId', 'clientType', 'name', 'nif', 'address', 'province',
+        'phone', 'email', 'contactPerson', 'creditLimit', 'currentBalance',
+        'totalInvoiced', 'totalPaid', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'companyId', 'clientType', 'name', 'nif', 'address', 'province',
+        'phone', 'email', 'contactPerson', 'creditLimit', 'currentBalance',
+        'totalInvoiced', 'totalPaid', 'createdAt', 'updatedAt'
+      ]) &&
+      data.ownerId == request.auth.uid &&
+      isValidId(data.ownerId) &&
+      isValidId(data.companyId) &&
+      data.clientType is string && data.clientType.size() <= 30 && data.clientType in ['empresarial', 'particular'] &&
+      data.name is string && data.name.size() >= 2 && data.name.size() <= 160 &&
+      data.nif is string && data.nif.size() >= 5 && data.nif.size() <= 30 &&
+      data.address is string && data.address.size() <= 250 &&
+      data.province is string && data.province.size() <= 80 &&
+      data.phone is string && data.phone.size() <= 40 &&
+      data.email is string && data.email.size() <= 120 &&
+      data.contactPerson is string && data.contactPerson.size() <= 120 &&
+      data.creditLimit is number && data.creditLimit >= 0 &&
+      data.currentBalance is number &&
+      data.totalInvoiced is number && data.totalInvoiced >= 0 &&
+      data.totalPaid is number && data.totalPaid >= 0 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll([
+        'ownerId', 'companyId', 'itemType', 'code', 'barcode', 'description',
+        'category', 'purchasePrice', 'salePrice', 'unit', 'taxRate', 'taxExemptionReason',
+        'stock', 'minStock', 'warehouse', 'profitMargin', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'companyId', 'itemType', 'code', 'barcode', 'description',
+        'category', 'purchasePrice', 'salePrice', 'unit', 'taxRate', 'taxExemptionReason',
+        'stock', 'minStock', 'warehouse', 'profitMargin', 'createdAt', 'updatedAt'
+      ]) &&
+      data.ownerId == request.auth.uid &&
+      isValidId(data.ownerId) &&
+      isValidId(data.companyId) &&
+      data.itemType is string && data.itemType.size() <= 20 && data.itemType in ['produto', 'servico'] &&
+      data.code is string && data.code.size() >= 1 && data.code.size() <= 40 &&
+      data.barcode is string && data.barcode.size() <= 60 &&
+      data.description is string && data.description.size() >= 2 && data.description.size() <= 200 &&
+      data.category is string && data.category.size() <= 80 &&
+      data.purchasePrice is number && data.purchasePrice >= 0 &&
+      data.salePrice is number && data.salePrice >= 0 &&
+      data.unit is string && data.unit.size() <= 20 &&
+      data.taxRate is number && data.taxRate >= 0 && data.taxRate <= 100 &&
+      data.taxExemptionReason is string && data.taxExemptionReason.size() <= 160 &&
+      data.stock is number &&
+      data.minStock is number && data.minStock >= 0 &&
+      data.warehouse is string && data.warehouse.size() <= 80 &&
+      data.profitMargin is number &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidInvoice(data) {
+      return data.keys().hasAll([
+        'ownerId', 'companyId', 'docType', 'series', 'sequentialNumber', 'docNumber',
+        'issueDate', 'dueDate', 'emitterName', 'emitterNif', 'clientId', 'clientName',
+        'clientNif', 'clientAddress', 'itemsSummary', 'subtotal', 'discountTotal',
+        'taxTotal', 'totalAmount', 'amountInWords', 'paymentTerms', 'paymentMethod',
+        'notes', 'qrCodePayload', 'hashCode', 'softwareCertText', 'status',
+        'paidAmount', 'printCount', 'agtTransmissionStatus', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'companyId', 'docType', 'series', 'sequentialNumber', 'docNumber',
+        'issueDate', 'dueDate', 'emitterName', 'emitterNif', 'clientId', 'clientName',
+        'clientNif', 'clientAddress', 'itemsSummary', 'subtotal', 'discountTotal',
+        'taxTotal', 'totalAmount', 'amountInWords', 'paymentTerms', 'paymentMethod',
+        'notes', 'qrCodePayload', 'hashCode', 'softwareCertText', 'status',
+        'paidAmount', 'printCount', 'agtTransmissionStatus', 'agtOperationId',
+        'agtResponseJson', 'createdAt', 'updatedAt'
+      ]) &&
+      data.ownerId == request.auth.uid &&
+      isValidId(data.ownerId) &&
+      isValidId(data.companyId) &&
+      data.docType is string && data.docType.size() <= 40 &&
+      data.docType in [
+        'Factura', 'Factura-Recibo', 'Factura Proforma', 'Recibo',
+        'Nota de Credito', 'Nota de Debito', 'Orcamento',
+        'Guia de Remessa', 'Guia de Transporte', 'Aviso de Cobranca', 'Factura Global'
+      ] &&
+      data.series is string && data.series.size() >= 2 && data.series.size() <= 30 &&
+      data.sequentialNumber is number && data.sequentialNumber >= 1 &&
+      data.docNumber is string && data.docNumber.size() >= 3 && data.docNumber.size() <= 50 &&
+      data.issueDate is string && data.issueDate.size() <= 40 &&
+      data.dueDate is string && data.dueDate.size() <= 40 &&
+      data.emitterName is string && data.emitterName.size() <= 160 &&
+      data.emitterNif is string && data.emitterNif.size() <= 30 &&
+      data.clientId is string && data.clientId.size() <= 128 &&
+      data.clientName is string && data.clientName.size() <= 160 &&
+      data.clientNif is string && data.clientNif.size() <= 30 &&
+      data.clientAddress is string && data.clientAddress.size() <= 250 &&
+      data.itemsSummary is string && data.itemsSummary.size() <= 2000 &&
+      data.subtotal is number && data.subtotal >= 0 &&
+      data.discountTotal is number && data.discountTotal >= 0 &&
+      data.taxTotal is number && data.taxTotal >= 0 &&
+      data.totalAmount is number && data.totalAmount >= 0 &&
+      data.amountInWords is string && data.amountInWords.size() <= 300 &&
+      data.paymentTerms is string && data.paymentTerms.size() <= 100 &&
+      data.paymentMethod is string && data.paymentMethod.size() <= 60 &&
+      data.notes is string && data.notes.size() <= 500 &&
+      data.qrCodePayload is string && data.qrCodePayload.size() <= 600 &&
+      data.hashCode is string && data.hashCode.size() <= 128 &&
+      data.softwareCertText is string && data.softwareCertText.size() <= 200 &&
+      data.status is string && data.status.size() <= 30 &&
+      data.status in ['emitida', 'paga', 'pendente', 'vencida', 'rectificada'] &&
+      data.paidAmount is number && data.paidAmount >= 0 &&
+      data.printCount is number && data.printCount >= 0 &&
+      data.agtTransmissionStatus is string && data.agtTransmissionStatus.size() <= 40 &&
+      data.agtTransmissionStatus in [
+        'rascunho', 'pendente_transmissao', 'recebida_agt', 'em_processamento',
+        'validada', 'rejeitada', 'erro_comunicacao', 'preparacao_certificacao',
+        'pendente_envio', 'contingencia', 'registado_local'
+      ] &&
+      (!('agtOperationId' in data) || (data.agtOperationId is string && data.agtOperationId.size() <= 120)) &&
+      (!('agtResponseJson' in data) || (data.agtResponseJson is string && data.agtResponseJson.size() <= 1500)) &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidInventoryMovement(data) {
+      return data.keys().hasAll([
+        'ownerId', 'companyId', 'productId', 'productName', 'movementType', 'quantity',
+        'warehouseOrigin', 'warehouseDest', 'unitCost', 'referenceDoc', 'notes',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'companyId', 'productId', 'productName', 'movementType', 'quantity',
+        'warehouseOrigin', 'warehouseDest', 'unitCost', 'referenceDoc', 'notes',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.ownerId == request.auth.uid &&
+      isValidId(data.ownerId) &&
+      isValidId(data.companyId) &&
+      data.productId is string && data.productId.size() <= 128 &&
+      data.productName is string && data.productName.size() <= 200 &&
+      data.movementType is string && data.movementType.size() <= 30 &&
+      data.movementType in ['entrada', 'saida', 'transferencia', 'devolucao', 'ajuste'] &&
+      data.quantity is number && data.quantity > 0 &&
+      data.warehouseOrigin is string && data.warehouseOrigin.size() <= 80 &&
+      data.warehouseDest is string && data.warehouseDest.size() <= 80 &&
+      data.unitCost is number && data.unitCost >= 0 &&
+      data.referenceDoc is string && data.referenceDoc.size() <= 80 &&
+      data.notes is string && data.notes.size() <= 300 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidFinancialTransaction(data) {
+      return data.keys().hasAll([
+        'ownerId', 'companyId', 'txType', 'category', 'description', 'amount',
+        'paymentMethod', 'accountName', 'referenceDoc', 'entityName', 'status',
+        'txDate', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'companyId', 'txType', 'category', 'description', 'amount',
+        'paymentMethod', 'accountName', 'referenceDoc', 'entityName', 'status',
+        'txDate', 'createdAt', 'updatedAt'
+      ]) &&
+      data.ownerId == request.auth.uid &&
+      isValidId(data.ownerId) &&
+      isValidId(data.companyId) &&
+      data.txType is string && data.txType.size() <= 40 &&
+      data.txType in ['recebimento', 'despesa', 'pagamento_fornecedor', 'transferencia_caixa'] &&
+      data.category is string && data.category.size() <= 80 &&
+      data.description is string && data.description.size() >= 2 && data.description.size() <= 200 &&
+      data.amount is number && data.amount > 0 &&
+      data.paymentMethod is string && data.paymentMethod.size() <= 40 &&
+      data.paymentMethod in ['transferencia', 'numerario', 'pos', 'multicaixa_express', 'referencia'] &&
+      data.accountName is string && data.accountName.size() <= 100 &&
+      data.referenceDoc is string && data.referenceDoc.size() <= 80 &&
+      data.entityName is string && data.entityName.size() <= 160 &&
+      data.status is string && data.status.size() <= 30 &&
+      data.status in ['liquidado', 'pendente', 'reconciliado'] &&
+      data.txDate is string && data.txDate.size() <= 40 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidSupplier(data) {
+      return data.keys().hasAll([
+        'ownerId', 'companyId', 'name', 'nif', 'phone', 'email', 'address',
+        'category', 'totalPurchased', 'balanceDue', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'companyId', 'name', 'nif', 'phone', 'email', 'address',
+        'category', 'totalPurchased', 'balanceDue', 'createdAt', 'updatedAt'
+      ]) &&
+      data.ownerId == request.auth.uid &&
+      isValidId(data.ownerId) &&
+      isValidId(data.companyId) &&
+      data.name is string && data.name.size() >= 2 && data.name.size() <= 160 &&
+      data.nif is string && data.nif.size() >= 5 && data.nif.size() <= 30 &&
+      data.phone is string && data.phone.size() <= 40 &&
+      data.email is string && data.email.size() <= 120 &&
+      data.address is string && data.address.size() <= 250 &&
+      data.category is string && data.category.size() <= 80 &&
+      data.totalPurchased is number && data.totalPurchased >= 0 &&
+      data.balanceDue is number && data.balanceDue >= 0 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidTeamMember(data) {
+      return data.keys().hasAll([
+        'ownerId', 'companyId', 'name', 'email', 'role', 'establishment',
+        'permissionsSummary', 'status', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'companyId', 'name', 'email', 'role', 'establishment',
+        'permissionsSummary', 'status', 'createdAt', 'updatedAt'
+      ]) &&
+      data.ownerId == request.auth.uid &&
+      isValidId(data.ownerId) &&
+      isValidId(data.companyId) &&
+      data.name is string && data.name.size() >= 2 && data.name.size() <= 120 &&
+      data.email is string && data.email.size() >= 5 && data.email.size() <= 120 &&
+      data.role is string && data.role.size() <= 40 &&
+      data.role in [
+        'Administrador', 'Gerente', 'Contabilista',
+        'Operador de facturacao', 'Vendedor', 'Responsavel de armazem', 'Consulta'
+      ] &&
+      data.establishment is string && data.establishment.size() <= 100 &&
+      data.permissionsSummary is string && data.permissionsSummary.size() <= 300 &&
+      data.status is string && data.status.size() <= 20 && data.status in ['activo', 'suspenso'] &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidSupportTicket(data) {
+      return data.keys().hasAll([
+        'ownerId', 'companyId', 'companyName', 'subject', 'description', 'category',
+        'priority', 'attachmentRef', 'status', 'adminResponse', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'companyId', 'companyName', 'subject', 'description', 'category',
+        'priority', 'attachmentRef', 'status', 'adminResponse', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.ownerId) &&
+      isValidId(data.companyId) &&
+      data.companyName is string && data.companyName.size() <= 160 &&
+      data.subject is string && data.subject.size() >= 3 && data.subject.size() <= 160 &&
+      data.description is string && data.description.size() >= 5 && data.description.size() <= 1500 &&
+      data.category is string && data.category.size() <= 80 &&
+      data.priority is string && data.priority.size() <= 20 && data.priority in ['baixa', 'media', 'alta', 'urgente'] &&
+      data.attachmentRef is string && data.attachmentRef.size() <= 200 &&
+      data.status is string && data.status.size() <= 30 && data.status in ['aberto', 'em_analise', 'respondido', 'fechado'] &&
+      data.adminResponse is string && data.adminResponse.size() <= 1500 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll([
+        'ownerId', 'companyId', 'actorEmail', 'actorRole', 'action',
+        'module', 'targetRef', 'details', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'companyId', 'actorEmail', 'actorRole', 'action',
+        'module', 'targetRef', 'details', 'createdAt'
+      ]) &&
+      data.ownerId == request.auth.uid &&
+      isValidId(data.ownerId) &&
+      isValidId(data.companyId) &&
+      data.actorEmail is string && data.actorEmail.size() <= 120 &&
+      data.actorRole is string && data.actorRole.size() <= 60 &&
+      data.action is string && data.action.size() <= 120 &&
+      data.module is string && data.module.size() <= 60 &&
+      data.targetRef is string && data.targetRef.size() <= 120 &&
+      data.details is string && data.details.size() <= 500 &&
+      data.createdAt is timestamp;
+    }
+
+    function isValidSubscriptionPayment(data) {
+      return data.keys().hasAll([
+        'ownerId', 'companyId', 'companyName', 'companyNif', 'planId', 'billingCycle',
+        'amountKz', 'mcxChannelNumber', 'beneficiaryName', 'orderReference',
+        'transactionReference', 'paymentModality', 'proofFileName', 'proofDataUrl',
+        'paymentDeadline', 'status', 'adminNotes', 'receiptNumber', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'companyId', 'companyName', 'companyNif', 'planId', 'billingCycle',
+        'amountKz', 'mcxChannelNumber', 'beneficiaryName', 'orderReference',
+        'transactionReference', 'paymentModality', 'proofFileName', 'proofDataUrl',
+        'paymentDeadline', 'status', 'adminNotes', 'receiptNumber', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.ownerId) &&
+      isValidId(data.companyId) &&
+      data.companyName is string && data.companyName.size() <= 160 &&
+      data.companyNif is string && data.companyNif.size() <= 30 &&
+      data.planId is string && data.planId.size() <= 30 && data.planId in ['starter', 'profissional', 'empresarial'] &&
+      data.billingCycle is string && data.billingCycle.size() <= 30 && data.billingCycle in ['mensal', 'trimestral', 'semestral', 'anual'] &&
+      data.amountKz is number && data.amountKz > 0 &&
+      data.mcxChannelNumber is string && data.mcxChannelNumber.size() <= 30 &&
+      data.beneficiaryName is string && data.beneficiaryName.size() <= 60 &&
+      data.orderReference is string && data.orderReference.size() >= 3 && data.orderReference.size() <= 80 &&
+      data.transactionReference is string && data.transactionReference.size() <= 120 &&
+      data.paymentModality is string && data.paymentModality.size() <= 40 &&
+      data.paymentModality in ['automatico_emis', 'confirmacao_administrativa'] &&
+      data.proofFileName is string && data.proofFileName.size() <= 160 &&
+      data.proofDataUrl is string && data.proofDataUrl.size() <= 60000 &&
+      data.paymentDeadline is string && data.paymentDeadline.size() <= 40 &&
+      data.status is string && data.status.size() <= 30 &&
+      data.status in ['pendente', 'confirmado', 'rejeitado', 'novo_comprovativo'] &&
+      data.adminNotes is string && data.adminNotes.size() <= 1000 &&
+      data.receiptNumber is string && data.receiptNumber.size() <= 80 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidAgtCommunicationLog(data) {
+      return data.keys().hasAll([
+        'ownerId', 'companyId', 'serviceName', 'environment', 'targetRef',
+        'jwsHeaderSummary', 'requestPayloadSummary', 'responsePayloadSummary',
+        'httpStatus', 'resultStatus', 'operationId', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'companyId', 'serviceName', 'environment', 'targetRef',
+        'jwsHeaderSummary', 'requestPayloadSummary', 'responsePayloadSummary',
+        'httpStatus', 'resultStatus', 'operationId', 'createdAt'
+      ]) &&
+      data.ownerId == request.auth.uid &&
+      isValidId(data.ownerId) &&
+      isValidId(data.companyId) &&
+      data.serviceName is string && data.serviceName.size() <= 40 &&
+      data.serviceName in [
+        'registarFactura', 'obterEstado', 'listarFacturas',
+        'consultarFactura', 'solicitarSerie', 'listarSeries', 'validarDocumento'
+      ] &&
+      data.environment is string && data.environment.size() <= 30 && data.environment in ['homologacao', 'producao'] &&
+      data.targetRef is string && data.targetRef.size() <= 120 &&
+      data.jwsHeaderSummary is string && data.jwsHeaderSummary.size() <= 600 &&
+      data.requestPayloadSummary is string && data.requestPayloadSummary.size() <= 1000 &&
+      data.responsePayloadSummary is string && data.responsePayloadSummary.size() <= 1000 &&
+      data.httpStatus is number &&
+      data.resultStatus is string && data.resultStatus.size() <= 40 &&
+      data.operationId is string && data.operationId.size() <= 120 &&
+      data.createdAt is timestamp;
+    }
+
+    function isValidAdminProfile(data) {
+      return data.keys().hasAll(['email', 'createdAt']) &&
+        data.keys().hasOnly(['email', 'createdAt']) &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 120 &&
+        data.createdAt is timestamp;
+    }
+
+    // 4. Collection Rules (Eight Pillars Enforced)
+
+    match /companies/{companyId} {
+      allow get: if isSignedIn() && isValidId(companyId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(companyId) &&
+        isValidCompany(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(companyId) &&
+        isValidCompany(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Owner updates company profile, logo, or fiscal settings
+          (existing().ownerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'commercialName', 'address', 'province', 'municipality',
+              'phone', 'email', 'economicActivity', 'taxRegime', 'vatScheme',
+              'responsibleName', 'bankName', 'bankIban', 'establishmentsCount',
+              'planId', 'billingCycle', 'agtStatus', 'agtCertificateRef',
+              'agtEnvironment', 'logoUrl', 'agtAdhesionStatus', 'updatedAt'
+            ])
+          ) ||
+          // Action 2: Central ALHAN Admin approves/suspends subscription, sets dates, or updates plan
+          (isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'subscriptionStatus', 'planId', 'billingCycle', 'agtStatus',
+              'agtEnvironment', 'subscriptionStartDate', 'subscriptionEndDate',
+              'agtAdhesionStatus', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /clients/{clientId} {
+      allow get: if isSignedIn() && isValidId(clientId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(clientId) &&
+        isValidClient(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        ownsParentCompany(incoming().companyId);
+      allow update: if isVerifiedUser() &&
+        isValidId(clientId) &&
+        isValidClient(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().companyId == existing().companyId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'clientType', 'name', 'nif', 'address', 'province', 'phone',
+          'email', 'contactPerson', 'creditLimit', 'currentBalance',
+          'totalInvoiced', 'totalPaid', 'updatedAt'
+        ]) &&
+        ownsParentCompany(existing().companyId);
+      allow delete: if isVerifiedUser() &&
+        isValidId(clientId) &&
+        existing().ownerId == request.auth.uid &&
+        ownsParentCompany(existing().companyId);
+    }
+
+    match /products/{productId} {
+      allow get: if isSignedIn() && isValidId(productId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(productId) &&
+        isValidProduct(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        ownsParentCompany(incoming().companyId);
+      allow update: if isVerifiedUser() &&
+        isValidId(productId) &&
+        isValidProduct(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().companyId == existing().companyId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'itemType', 'code', 'barcode', 'description', 'category',
+          'purchasePrice', 'salePrice', 'unit', 'taxRate', 'taxExemptionReason',
+          'stock', 'minStock', 'warehouse', 'profitMargin', 'updatedAt'
+        ]) &&
+        ownsParentCompany(existing().companyId);
+      allow delete: if isVerifiedUser() &&
+        isValidId(productId) &&
+        existing().ownerId == request.auth.uid &&
+        ownsParentCompany(existing().companyId);
+    }
+
+    // Invoices: Fiscal immutability enforced (No delete, No admin silent edits, Terminal state lock on 'rectificada')
+    match /invoices/{invoiceId} {
+      allow get: if isSignedIn() && isValidId(invoiceId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(invoiceId) &&
+        isValidInvoice(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        ownsParentCompany(incoming().companyId);
+      allow update: if isVerifiedUser() &&
+        isValidId(invoiceId) &&
+        isValidInvoice(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        existing().status != 'rectificada' &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().companyId == existing().companyId &&
+        incoming().docNumber == existing().docNumber &&
+        incoming().series == existing().series &&
+        incoming().sequentialNumber == existing().sequentialNumber &&
+        incoming().subtotal == existing().subtotal &&
+        incoming().taxTotal == existing().taxTotal &&
+        incoming().totalAmount == existing().totalAmount &&
+        incoming().hashCode == existing().hashCode &&
+        incoming().emitterNif == existing().emitterNif &&
+        incoming().clientNif == existing().clientNif &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'paidAmount', 'printCount', 'agtTransmissionStatus',
+          'agtOperationId', 'agtResponseJson', 'updatedAt'
+        ]) &&
+        ownsParentCompany(existing().companyId);
+      allow delete: if false;
+    }
+
+    match /inventory_movements/{movementId} {
+      allow get: if isSignedIn() && isValidId(movementId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(movementId) &&
+        isValidInventoryMovement(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        ownsParentCompany(incoming().companyId);
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /financial_transactions/{transactionId} {
+      allow get: if isSignedIn() && isValidId(transactionId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(transactionId) &&
+        isValidFinancialTransaction(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        ownsParentCompany(incoming().companyId);
+      allow update: if isVerifiedUser() &&
+        isValidId(transactionId) &&
+        isValidFinancialTransaction(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().companyId == existing().companyId &&
+        incoming().amount == existing().amount &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'referenceDoc', 'updatedAt'
+        ]) &&
+        ownsParentCompany(existing().companyId);
+      allow delete: if false;
+    }
+
+    match /suppliers/{supplierId} {
+      allow get: if isSignedIn() && isValidId(supplierId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(supplierId) &&
+        isValidSupplier(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        ownsParentCompany(incoming().companyId);
+      allow update: if isVerifiedUser() &&
+        isValidId(supplierId) &&
+        isValidSupplier(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().companyId == existing().companyId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'nif', 'phone', 'email', 'address', 'category',
+          'totalPurchased', 'balanceDue', 'updatedAt'
+        ]) &&
+        ownsParentCompany(existing().companyId);
+      allow delete: if isVerifiedUser() &&
+        isValidId(supplierId) &&
+        existing().ownerId == request.auth.uid &&
+        ownsParentCompany(existing().companyId);
+    }
+
+    match /team_members/{memberId} {
+      allow get: if isSignedIn() && isValidId(memberId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(memberId) &&
+        isValidTeamMember(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        ownsParentCompany(incoming().companyId);
+      allow update: if isVerifiedUser() &&
+        isValidId(memberId) &&
+        isValidTeamMember(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().companyId == existing().companyId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'email', 'role', 'establishment', 'permissionsSummary', 'status', 'updatedAt'
+        ]) &&
+        ownsParentCompany(existing().companyId);
+      allow delete: if isVerifiedUser() &&
+        isValidId(memberId) &&
+        existing().ownerId == request.auth.uid &&
+        ownsParentCompany(existing().companyId);
+    }
+
+    match /support_tickets/{ticketId} {
+      allow get: if isSignedIn() && isValidId(ticketId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(ticketId) &&
+        isValidSupportTicket(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        ownsParentCompany(incoming().companyId);
+      allow update: if isVerifiedUser() &&
+        isValidId(ticketId) &&
+        isValidSupportTicket(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().companyId == existing().companyId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Owner updates ticket description or closes ticket
+          (existing().ownerId == request.auth.uid &&
+            existing().status != 'fechado' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['description', 'status', 'updatedAt'])
+          ) ||
+          // Action 2: Central ALHAN Admin responds and updates ticket status
+          (isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminResponse', 'updatedAt'])
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /audit_logs/{logId} {
+      allow get: if isSignedIn() && isValidId(logId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(logId) &&
+        isValidAuditLog(incoming()) &&
+        incoming().createdAt == request.time &&
+        ownsParentCompany(incoming().companyId);
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Subscription Payments: Client creates in 'pendente' state (never self-confirming); Admin confirms/rejects
+    match /subscription_payments/{paymentId} {
+      allow get: if isSignedIn() && isValidId(paymentId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(paymentId) &&
+        isValidSubscriptionPayment(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().status == 'pendente' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        ownsParentCompany(incoming().companyId);
+      allow update: if isVerifiedUser() &&
+        isValidId(paymentId) &&
+        isValidSubscriptionPayment(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().companyId == existing().companyId &&
+        incoming().amountKz == existing().amountKz &&
+        incoming().orderReference == existing().orderReference &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Owner uploads new proof when status is 'novo_comprovativo' or 'pendente'
+          (existing().ownerId == request.auth.uid &&
+            existing().status != 'confirmado' &&
+            incoming().status == 'pendente' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'transactionReference', 'proofFileName', 'proofDataUrl', 'status', 'updatedAt'
+            ])
+          ) ||
+          // Action 2: Central ALHAN Admin confirms, rejects, or requests new proof
+          (isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'adminNotes', 'receiptNumber', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /agt_communications/{commId} {
+      allow get: if isSignedIn() && isValidId(commId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(commId) &&
+        isValidAgtCommunicationLog(incoming()) &&
+        incoming().createdAt == request.time &&
+        ownsParentCompany(incoming().companyId);
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create, update: if isBootstrappedAdmin() &&
+        isValidId(adminId) &&
+        isValidAdminProfile(incoming()) &&
+        incoming().createdAt == request.time;
+      allow delete: if false;
+    }
+  }
+}

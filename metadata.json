@@ -1,0 +1,6 @@
+{
+  "name": "ALHAN FACTURA — Facturação Electrónica e Gestão Empresarial (Angola)",
+  "description": "Plataforma SaaS multi-empresa de facturação electrónica, SAF-T AO, preparação para certificação AGT (Decreto Presidencial n.º 71/25), inventário, gestão financeira e controlo comercial em Kwanzas (AOA).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
