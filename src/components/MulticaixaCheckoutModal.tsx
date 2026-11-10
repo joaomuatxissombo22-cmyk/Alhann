@@ -21,7 +21,9 @@ import {
 } from '../types/models';
 import {
   ALHAN_OFFICIAL_LOGO_URL,
+  BLACK_FRIDAY_DISCOUNT_PERCENT,
   calcularPrecoCiclo,
+  calcularPrecoOriginalSemBlackFriday,
   comprimirImagemParaBase64,
   formatKz,
   getLuandaIsoDate,
@@ -83,7 +85,11 @@ export const MulticaixaCheckoutModal: React.FC<MulticaixaCheckoutModalProps> = (
   const selectedPlan =
     plans.find((p) => p.id === selectedPlanId) || plans[1] || plans[0];
 
-  const amountKz = calcularPrecoCiclo(selectedPlan.monthlyPriceKz, selectedCycle);
+  const originalAmountKz = calcularPrecoOriginalSemBlackFriday(
+    selectedPlan.monthlyPriceKz,
+    selectedCycle
+  );
+  const amountKz = calcularPrecoCiclo(selectedPlan.monthlyPriceKz, selectedCycle, true);
 
   const orderReference = useMemo(() => {
     const cleanNif = (company.nif || '5000').slice(-4);
@@ -392,8 +398,13 @@ export const MulticaixaCheckoutModal: React.FC<MulticaixaCheckoutModalProps> = (
                   </p>
                 </div>
 
-                <div className="pt-1">
-                  <p className="text-[11px] text-slate-400">Valor Total a Pagar em Kwanzas:</p>
+                <div className="pt-1 space-y-0.5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] text-slate-400">Valor c/ Promo Black Friday (-{BLACK_FRIDAY_DISCOUNT_PERCENT}%):</p>
+                    <span className="text-[11px] font-mono line-through text-slate-500">
+                      {formatKz(originalAmountKz)}
+                    </span>
+                  </div>
                   <p className="text-2xl font-bold font-mono text-emerald-400">
                     {formatKz(amountKz)}
                   </p>

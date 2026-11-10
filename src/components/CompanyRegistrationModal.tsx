@@ -450,15 +450,17 @@ export const CompanyRegistrationModal: React.FC<CompanyRegistrationProps> = ({
                 />
               </div>
               <div className="sm:col-span-2">
-                <label className="block font-semibold text-slate-700 mb-1">Plano Subscrito</label>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Plano Subscrito (Promoção Black Friday -60% Aplicada)
+                </label>
                 <select
                   value={form.planId}
                   onChange={(e) => setForm({ ...form, planId: e.target.value as PlanIdType })}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 bg-white focus:border-sky-600 focus:outline-none"
                 >
-                  <option value="starter">PLANO STARTER (18.500 Kz/mês)</option>
-                  <option value="profissional">PLANO PROFISSIONAL (42.000 Kz/mês)</option>
-                  <option value="empresarial">PLANO EMPRESARIAL (89.000 Kz/mês)</option>
+                  <option value="starter">PLANO STARTER — 7.400 Kz/mês (Antes: 18.500 Kz · -60% Black Friday)</option>
+                  <option value="profissional">PLANO PROFISSIONAL — 16.800 Kz/mês (Antes: 42.000 Kz · -60% Black Friday)</option>
+                  <option value="empresarial">PLANO EMPRESARIAL — 35.600 Kz/mês (Antes: 89.000 Kz · -60% Black Friday)</option>
                 </select>
               </div>
               <div className="sm:col-span-2">

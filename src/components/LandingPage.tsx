@@ -17,6 +17,9 @@ import {
 import { BillingCycleType, PlanIdType, SubscriptionPlanConfig } from '../types/models';
 import {
   ALHAN_OFFICIAL_LOGO_URL,
+  BLACK_FRIDAY_DISCOUNT_PERCENT,
+  calcularPrecoCiclo,
+  calcularPrecoOriginalSemBlackFriday,
   formatKz,
   MCX_EXPRESS_BENEFICIARY,
   MCX_EXPRESS_OFFICIAL_NUMBER,
@@ -53,18 +56,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [featureImgError, setFeatureImgError] = useState(false);
   const [avatarImgError, setAvatarImgError] = useState(false);
 
-  const calculateCyclePrice = (monthlyKz: number, cycle: BillingCycleType): number => {
-    if (cycle === 'trimestral') return Math.round(monthlyKz * 3 * 0.95);
-    if (cycle === 'semestral') return Math.round(monthlyKz * 6 * 0.9);
-    if (cycle === 'anual') return Math.round(monthlyKz * 12 * 0.8);
-    return monthlyKz;
-  };
-
   const cycleLabel: Record<BillingCycleType, string> = {
-    mensal: '/ mês',
-    trimestral: '/ trimestre (5% desc.)',
-    semestral: '/ semestre (10% desc.)',
-    anual: '/ ano (20% desc.)',
+    mensal: '/ mês (Promo Black Friday -60%)',
+    trimestral: '/ trimestre (Promo Black Friday -60%)',
+    semestral: '/ semestre (Promo Black Friday -60%)',
+    anual: '/ ano (Promo Black Friday -60%)',
   };
 
   const faqs = [
@@ -166,8 +162,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             {/* Left Column: Proposition & CTAs */}
             <div className="lg:col-span-7 flex flex-col justify-between space-y-6">
               <div className="space-y-5">
-                <p className="text-xs font-medium text-sky-400 tracking-wide">
-                  ALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA · Luanda, Angola · Moeda AOA (Kz)
+                <p className="text-xs font-medium text-amber-400 tracking-wide">
+                  CAMPANHA BLACK FRIDAY ACTIVA: 60% DE DESCONTO EM TODOS OS PLANOS E SUBSCRIÇÕES · AOA (Kz)
                 </p>
 
                 <h1
@@ -178,7 +174,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 </h1>
 
                 <p className="text-base text-slate-300 leading-relaxed max-w-2xl">
-                  Plataforma SaaS multi-empresa desenvolvida para comerciantes, prestadores de serviços, PME e grandes empresas em Angola. Emita facturas em A4 e talão térmico, controle stock multi-armazém, reconcilie contas bancárias e exporte o SAF-T AO em estrita conformidade com o Decreto Presidencial n.º 71/25 da AGT.
+                  Plataforma SaaS multi-empresa desenvolvida para comerciantes, prestadores de serviços, PME e grandes empresas em Angola. Emita facturas em A4 e talão térmico (móvel e computador) com IVA de 14%, retenção na fonte de 6,5% e exportação SAF-T AO em conformidade com o Decreto Presidencial n.º 71/25 da AGT.
                 </p>
               </div>
 
@@ -473,10 +469,35 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       {/* Commercial Plans & Subscriptions */}
       <section id="planos" className="py-16 lg:py-24 bg-slate-50 border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-6 lg:px-12 space-y-10">
+          {/* Black Friday 60% Banner */}
+          <div className="p-5 rounded-xl bg-slate-950 text-white border border-amber-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <p className="text-xs font-mono font-bold text-amber-400">
+                PROMOÇÃO ESPECIAL BLACK FRIDAY — {BLACK_FRIDAY_DISCOUNT_PERCENT}% DE DESCONTO IMEDIATO
+              </p>
+              <h3 className="text-base sm:text-lg font-bold">
+                Todos os Planos ALHAN FACTURA com 60% de Desconto Aplicado Automaticamente
+              </h3>
+              <p className="text-xs text-slate-300">
+                Subscreva pelo canal oficial Multicaixa Express ({MCX_EXPRESS_OFFICIAL_NUMBER} — Beneficiário: {MCX_EXPRESS_BENEFICIARY}) e garanta 60% de redução na sua subscrição empresarial.
+              </p>
+            </div>
+            <a
+              href="#planos"
+              onClick={(e) => {
+                e.preventDefault();
+                onSignInGoogle('profissional', billingCycle);
+              }}
+              className="px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs whitespace-nowrap shrink-0 text-center"
+            >
+              Aproveitar Black Friday (-60%)
+            </a>
+          </div>
+
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
             <div className="space-y-2 max-w-2xl">
               <p className="text-xs font-semibold text-sky-700">
-                PLANOS COMERCIAIS E SUBSCRIÇÕES EM KWANZAS (AOA)
+                PLANOS COMERCIAIS E SUBSCRIÇÕES EM KWANZAS (AOA) · PROMOÇÃO BLACK FRIDAY -60%
               </p>
               <h2 className="text-2xl sm:text-4xl font-bold text-slate-900 tracking-tight font-display">
                 Escolha o Plano Ideal para a Dimensão da Sua Empresa
@@ -507,7 +528,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
             {plans.map((plan) => {
               const isHighlighted = plan.id === 'profissional';
-              const totalCyclePrice = calculateCyclePrice(plan.monthlyPriceKz, billingCycle);
+              const originalPrice = calcularPrecoOriginalSemBlackFriday(plan.monthlyPriceKz, billingCycle);
+              const totalCyclePrice = calcularPrecoCiclo(plan.monthlyPriceKz, billingCycle, true);
               return (
                 <div
                   key={plan.id}
@@ -519,13 +541,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 >
                   <div className="space-y-5">
                     <div>
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <h3 className="text-lg font-bold tracking-tight">{plan.name}</h3>
-                        {isHighlighted && (
-                          <span className="text-xs font-mono font-semibold text-sky-400">
-                            Mais Escolhido
-                          </span>
-                        )}
+                        <span className="text-xs font-mono font-bold text-amber-500">
+                          BLACK FRIDAY -60%
+                        </span>
                       </div>
                       <p
                         className={`text-xs mt-1 ${
@@ -537,7 +557,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     </div>
 
                     <div className="pt-2 border-t border-slate-200/20">
-                      <p className="text-3xl font-bold font-mono tabular-nums">
+                      <p
+                        className={`text-xs font-mono line-through ${
+                          isHighlighted ? 'text-slate-400' : 'text-slate-400'
+                        }`}
+                      >
+                        Antes: {formatKz(originalPrice)}
+                      </p>
+                      <p className="text-3xl font-bold font-mono tabular-nums text-amber-500">
                         {formatKz(totalCyclePrice)}
                       </p>
                       <p
@@ -573,7 +600,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                           : 'bg-slate-900 hover:bg-slate-800 text-white'
                       }`}
                     >
-                      Subscrever {plan.name}
+                      Subscrever {plan.name} (-60% Black Friday)
                     </button>
                   </div>
                 </div>

@@ -150,6 +150,10 @@ export interface Invoice {
   subtotal: number;
   discountTotal: number;
   taxTotal: number;
+  withholdingTaxRate?: number;
+  withholdingTaxTotal?: number;
+  netPayableAmount?: number;
+  blackFridayApplied?: boolean;
   totalAmount: number;
   amountInWords: string;
   paymentTerms: string;

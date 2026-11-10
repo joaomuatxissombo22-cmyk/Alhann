@@ -1,14 +1,19 @@
 {
-  "name": "react-example",
+  "name": "alhan-factura",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build",
-    "start": "node --import tsx server.ts",
+    "build": "vite build && node -e \"const fs=require('fs');['server.js','index.js','app.js'].forEach(f=>fs.copyFileSync('server.js','dist/'+f));\"",
+    "start": "node server.ts",
+    "start:prod": "node server.js",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
@@ -36,7 +41,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.27.0 || ^0.28.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",

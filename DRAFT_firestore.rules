@@ -173,7 +173,8 @@ service cloud.firestore {
         'ownerId', 'companyId', 'docType', 'series', 'sequentialNumber', 'docNumber',
         'issueDate', 'dueDate', 'emitterName', 'emitterNif', 'clientId', 'clientName',
         'clientNif', 'clientAddress', 'itemsSummary', 'subtotal', 'discountTotal',
-        'taxTotal', 'totalAmount', 'amountInWords', 'paymentTerms', 'paymentMethod',
+        'taxTotal', 'withholdingTaxRate', 'withholdingTaxTotal', 'netPayableAmount',
+        'blackFridayApplied', 'totalAmount', 'amountInWords', 'paymentTerms', 'paymentMethod',
         'notes', 'qrCodePayload', 'hashCode', 'softwareCertText', 'status',
         'paidAmount', 'printCount', 'agtTransmissionStatus', 'agtOperationId',
         'agtResponseJson', 'createdAt', 'updatedAt'
@@ -202,6 +203,10 @@ service cloud.firestore {
       data.subtotal is number && data.subtotal >= 0 &&
       data.discountTotal is number && data.discountTotal >= 0 &&
       data.taxTotal is number && data.taxTotal >= 0 &&
+      (!('withholdingTaxRate' in data) || (data.withholdingTaxRate is number && data.withholdingTaxRate >= 0 && data.withholdingTaxRate <= 100)) &&
+      (!('withholdingTaxTotal' in data) || (data.withholdingTaxTotal is number && data.withholdingTaxTotal >= 0)) &&
+      (!('netPayableAmount' in data) || (data.netPayableAmount is number && data.netPayableAmount >= 0)) &&
+      (!('blackFridayApplied' in data) || (data.blackFridayApplied is bool)) &&
       data.totalAmount is number && data.totalAmount >= 0 &&
       data.amountInWords is string && data.amountInWords.size() <= 300 &&
       data.paymentTerms is string && data.paymentTerms.size() <= 100 &&

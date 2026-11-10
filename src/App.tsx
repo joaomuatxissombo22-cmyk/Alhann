@@ -76,16 +76,20 @@ import {
 } from './types/models';
 import {
   ALHAN_OFFICIAL_LOGO_URL,
+  BLACK_FRIDAY_DISCOUNT_PERCENT,
   calcularDataVencimentoSubscricao,
   calcularDiasParaVencimento,
+  calcularResumoFiscalFactura,
   exportarFacturaPDF,
   formatKz,
   gerarAssinaturaHashAGT,
   gerarPayloadQrAGT,
   getLuandaIsoDate,
   INITIAL_PLANS,
+  IVA_STANDARD_RATE_AO,
   MCX_EXPRESS_BENEFICIARY,
   MCX_EXPRESS_OFFICIAL_NUMBER,
+  RETENCAO_FONTE_RATE_AO,
   valorPorExtensoKz,
 } from './lib/angolaUtils';
 import { LandingPage } from './components/LandingPage';
@@ -180,6 +184,8 @@ export default function App() {
   const [lineItems, setLineItems] = useState<
     { productId: string; quantity: number; discountPercent: number }[]
   >([]);
+  const [applyWithholding65, setApplyWithholding65] = useState(true);
+  const [applyBlackFriday60, setApplyBlackFriday60] = useState(false);
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>('todos');
   const [partialPaymentAmount, setPartialPaymentAmount] = useState<Record<string, number>>({});
@@ -1190,7 +1196,7 @@ export default function App() {
     }
   };
 
-  // Calculate Invoice Builder Totals
+  // Calculate Invoice Builder Totals (with 14% IVA, 6.5% Retencao na Fonte, and 60% Black Friday option)
   const invoiceDraftTotals = useMemo(() => {
     let subtotal = 0;
     let discountTotal = 0;
@@ -1199,11 +1205,13 @@ export default function App() {
       const prod = products.find((p) => p.id === line.productId) || products[0];
       const unitPrice = prod ? prod.salePrice : 0;
       const qty = Math.max(1, Number(line.quantity) || 1);
-      const discPct = Math.min(100, Math.max(0, Number(line.discountPercent) || 0));
+      const discPct = applyBlackFriday60
+        ? BLACK_FRIDAY_DISCOUNT_PERCENT
+        : Math.min(100, Math.max(0, Number(line.discountPercent) || 0));
       const grossLine = unitPrice * qty;
       const lineDisc = (grossLine * discPct) / 100;
       const lineSubtotal = grossLine - lineDisc;
-      const taxRate = prod ? prod.taxRate : 14;
+      const taxRate = prod && prod.taxRate > 0 ? prod.taxRate : IVA_STANDARD_RATE_AO;
       const lineTax = (lineSubtotal * taxRate) / 100;
       const lineTotal = lineSubtotal + lineTax;
 
@@ -1227,15 +1235,28 @@ export default function App() {
     });
 
     const totalAmount = subtotal + taxTotal;
+    const withholdingTaxRate = applyWithholding65 ? RETENCAO_FONTE_RATE_AO : 0;
+    const withholdingTaxTotal = applyWithholding65
+      ? (subtotal * RETENCAO_FONTE_RATE_AO) / 100
+      : 0;
+    const netPayableAmount = Math.max(0, totalAmount - withholdingTaxTotal);
+    const blackFridayApplied =
+      applyBlackFriday60 ||
+      detailedLines.some((l) => Number(l.discountPercent) >= BLACK_FRIDAY_DISCOUNT_PERCENT);
+
     return {
       subtotal,
       discountTotal,
       taxTotal,
       totalAmount,
+      withholdingTaxRate,
+      withholdingTaxTotal,
+      netPayableAmount,
+      blackFridayApplied,
       amountInWords: valorPorExtensoKz(totalAmount),
       detailedLines,
     };
-  }, [lineItems, products]);
+  }, [lineItems, products, applyWithholding65, applyBlackFriday60]);
 
   // Issue Fiscal or Commercial Document
   const handleIssueDocument = async (e: React.FormEvent) => {
@@ -1293,7 +1314,11 @@ export default function App() {
       subtotal: invoiceDraftTotals.subtotal,
       discountTotal: invoiceDraftTotals.discountTotal,
       taxTotal: invoiceDraftTotals.taxTotal,
+      withholdingTaxRate: invoiceDraftTotals.withholdingTaxRate,
+      withholdingTaxTotal: invoiceDraftTotals.withholdingTaxTotal,
       totalAmount: invoiceDraftTotals.totalAmount,
+      netPayableAmount: invoiceDraftTotals.netPayableAmount,
+      blackFridayApplied: invoiceDraftTotals.blackFridayApplied,
       amountInWords: invoiceDraftTotals.amountInWords.slice(0, 290),
       paymentTerms: paymentTerms.slice(0, 100),
       paymentMethod: paymentMethod.slice(0, 60),
@@ -2419,23 +2444,64 @@ export default function App() {
 
                 {/* Line Items Builder */}
                 <div className="space-y-3 pt-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-bold text-slate-900 dark:text-white">
                       Linhas de Produtos / Serviços do Documento
                     </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setLineItems([
-                          ...lineItems,
-                          { productId: products[0]?.id || '', quantity: 1, discountPercent: 0 },
-                        ])
-                      }
-                      className="flex items-center gap-1 text-sky-600 hover:text-sky-500 font-semibold"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Adicionar Linha
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextState = !applyBlackFriday60;
+                          setApplyBlackFriday60(nextState);
+                          setLineItems((prev) =>
+                            prev.map((item) => ({
+                              ...item,
+                              discountPercent: nextState ? BLACK_FRIDAY_DISCOUNT_PERCENT : 0,
+                            }))
+                          );
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors border ${
+                          applyBlackFriday60
+                            ? 'bg-rose-600 text-white border-rose-500 shadow-sm'
+                            : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 hover:bg-rose-100'
+                        }`}
+                      >
+                        {applyBlackFriday60
+                          ? `Promoção Black Friday (-${BLACK_FRIDAY_DISCOUNT_PERCENT}%) Activa`
+                          : `Aplicar Promoção Black Friday (-${BLACK_FRIDAY_DISCOUNT_PERCENT}%)`}
+                      </button>
+
+                      <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs font-semibold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={applyWithholding65}
+                          onChange={(e) => setApplyWithholding65(e.target.checked)}
+                          className="rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                        />
+                        <span>Retenção na Fonte ({RETENCAO_FONTE_RATE_AO}%)</span>
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLineItems([
+                            ...lineItems,
+                            {
+                              productId: products[0]?.id || '',
+                              quantity: 1,
+                              discountPercent: applyBlackFriday60
+                                ? BLACK_FRIDAY_DISCOUNT_PERCENT
+                                : 0,
+                            },
+                          ])
+                        }
+                        className="flex items-center gap-1 text-sky-600 hover:text-sky-500 font-semibold"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Adicionar Linha
+                      </button>
+                    </div>
                   </div>
 
                   <div className="space-y-2">
@@ -2458,7 +2524,7 @@ export default function App() {
                             >
                               {products.map((p) => (
                                 <option key={p.id} value={p.id}>
-                                  {p.code} — {p.description} ({formatKz(p.salePrice)} | IVA {p.taxRate}%)
+                                  {p.code} — {p.description} ({formatKz(p.salePrice)} | IVA {p.taxRate || IVA_STANDARD_RATE_AO}%)
                                 </option>
                               ))}
                             </select>
@@ -2485,10 +2551,14 @@ export default function App() {
                               type="number"
                               min={0}
                               max={100}
-                              value={line.discountPercent}
+                              value={applyBlackFriday60 ? BLACK_FRIDAY_DISCOUNT_PERCENT : line.discountPercent}
                               onChange={(e) => {
+                                const val = Number(e.target.value) || 0;
+                                if (applyBlackFriday60 && val !== BLACK_FRIDAY_DISCOUNT_PERCENT) {
+                                  setApplyBlackFriday60(false);
+                                }
                                 const copy = [...lineItems];
-                                copy[idx].discountPercent = Number(e.target.value) || 0;
+                                copy[idx].discountPercent = val;
                                 setLineItems(copy);
                               }}
                               className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-1.5 font-mono bg-white dark:bg-slate-900"
@@ -2531,32 +2601,61 @@ export default function App() {
                     <p className="text-slate-500 italic">
                       <strong>Valor por extenso:</strong> {invoiceDraftTotals.amountInWords}
                     </p>
+                    <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+                      <span className="px-2 py-0.5 rounded bg-sky-100 dark:bg-sky-950/60 text-sky-800 dark:text-sky-300 font-semibold">
+                        IVA Aplicado: {IVA_STANDARD_RATE_AO}% (Taxa Normal Angola)
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-semibold">
+                        Retenção na Fonte: {invoiceDraftTotals.withholdingTaxRate}% (Imposto Industrial)
+                      </span>
+                      {invoiceDraftTotals.blackFridayApplied && (
+                        <span className="px-2 py-0.5 rounded bg-rose-600 text-white font-bold">
+                          PROMOÇÃO BLACK FRIDAY -{BLACK_FRIDAY_DISCOUNT_PERCENT}% INCLUÍDA
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="lg:col-span-5 p-4 rounded-xl bg-slate-900 text-white space-y-2">
+                  <div className="lg:col-span-5 p-4 rounded-xl bg-slate-900 text-white space-y-1.5 text-xs">
                     <div className="flex justify-between text-slate-300">
-                      <span>Subtotal Ilíquido:</span>
+                      <span>Incidência Tributável (Líquido):</span>
                       <span className="font-mono">{formatKz(invoiceDraftTotals.subtotal)}</span>
                     </div>
-                    <div className="flex justify-between text-slate-300">
-                      <span>Total Descontos:</span>
+                    <div className="flex justify-between text-rose-400 font-semibold">
+                      <span>
+                        {invoiceDraftTotals.blackFridayApplied
+                          ? `Promoção Black Friday (${BLACK_FRIDAY_DISCOUNT_PERCENT}%):`
+                          : 'Total Descontos Comerciais:'}
+                      </span>
                       <span className="font-mono">
-                        {formatKz(invoiceDraftTotals.discountTotal)}
+                        - {formatKz(invoiceDraftTotals.discountTotal)}
                       </span>
                     </div>
-                    <div className="flex justify-between text-slate-300">
-                      <span>Total Imposto (IVA):</span>
-                      <span className="font-mono">{formatKz(invoiceDraftTotals.taxTotal)}</span>
+                    <div className="flex justify-between text-slate-200 font-semibold">
+                      <span>Imposto IVA ({IVA_STANDARD_RATE_AO}%):</span>
+                      <span className="font-mono">+ {formatKz(invoiceDraftTotals.taxTotal)}</span>
                     </div>
-                    <div className="flex justify-between text-sm font-bold text-sky-400 pt-1 border-t border-slate-800">
-                      <span>TOTAL GERAL (AOA):</span>
+                    <div className="flex justify-between text-amber-400 font-semibold">
+                      <span>Retenção na Fonte ({invoiceDraftTotals.withholdingTaxRate}%):</span>
+                      <span className="font-mono">
+                        - {formatKz(invoiceDraftTotals.withholdingTaxTotal)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm font-bold text-sky-400 pt-1.5 border-t border-slate-800">
+                      <span>TOTAL DA FACTURA (c/ IVA {IVA_STANDARD_RATE_AO}%):</span>
                       <span className="font-mono">{formatKz(invoiceDraftTotals.totalAmount)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs font-bold text-emerald-400 pb-1">
+                      <span>VALOR LÍQUIDO A PAGAR (após Ret. {RETENCAO_FONTE_RATE_AO}%):</span>
+                      <span className="font-mono">
+                        {formatKz(invoiceDraftTotals.netPayableAmount)}
+                      </span>
                     </div>
                     <button
                       type="submit"
                       className="w-full mt-2 py-2.5 px-4 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold transition-colors"
                     >
-                      Emitir {docType} Oficial e Gerar Hash/QR
+                      Emitir {docType} Oficial e Gerar Talão / A4
                     </button>
                   </div>
                 </div>
@@ -2614,12 +2713,20 @@ export default function App() {
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                       {filteredInvoicesList.map((inv) => {
                         const debt = Math.max(0, inv.totalAmount - inv.paidAmount);
+                        const fiscal = calcularResumoFiscalFactura(inv);
                         return (
                           <tr key={inv.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
                             <td className="py-3 px-4">
-                              <p className="font-mono font-bold text-sky-700 dark:text-sky-400">
-                                {inv.docNumber}
-                              </p>
+                              <div className="flex items-center gap-1.5">
+                                <p className="font-mono font-bold text-sky-700 dark:text-sky-400">
+                                  {inv.docNumber}
+                                </p>
+                                {fiscal.blackFridayApplied && (
+                                  <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[9px] font-bold">
+                                    BF -60%
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-slate-500">{inv.docType}</p>
                             </td>
                             <td className="py-3 px-4 font-mono">{inv.issueDate}</td>
@@ -2629,8 +2736,16 @@ export default function App() {
                               </p>
                               <p className="text-slate-500 font-mono">NIF: {inv.clientNif}</p>
                             </td>
-                            <td className="py-3 px-4 text-right font-mono font-bold">
-                              {formatKz(inv.totalAmount)}
+                            <td className="py-3 px-4 text-right font-mono">
+                              <p className="font-bold text-slate-900 dark:text-white">
+                                {formatKz(inv.totalAmount)}
+                              </p>
+                              <p className="text-[10px] text-slate-500">
+                                IVA 14%: {formatKz(fiscal.taxTotal)} | Ret. 6,5%: {formatKz(fiscal.withholdingAmount)}
+                              </p>
+                              <p className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                Líq.: {formatKz(fiscal.netPayableAmount)}
+                              </p>
                             </td>
                             <td className="py-3 px-4 text-right font-mono text-emerald-600">
                               {formatKz(inv.paidAmount)}
@@ -2654,7 +2769,18 @@ export default function App() {
                                   onClick={() => setPreviewInvoice(inv)}
                                   className="px-2.5 py-1 rounded bg-slate-900 dark:bg-sky-600 text-white font-semibold"
                                 >
-                                  Ver / Imprimir ({inv.printCount === 0 ? 'ORIGINAL' : '2.ª VIA'})
+                                  Talão Térmico / A4 ({inv.printCount === 0 ? 'ORIGINAL' : '2.ª VIA'})
+                                </button>
+
+                                <button
+                                  onClick={async () => {
+                                    exportarFacturaPDF(inv, activeCompany, 'TERMICO');
+                                    await handleIncrementPrintCount(inv);
+                                  }}
+                                  className="px-2 py-1 rounded border border-sky-300 dark:border-sky-700 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/50 font-semibold"
+                                  title="Descarregar Talão Térmico (Móvel / POS)"
+                                >
+                                  Talão PDF
                                 </button>
 
                                 <button
@@ -2664,7 +2790,7 @@ export default function App() {
                                   }}
                                   className="px-2 py-1 rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold"
                                 >
-                                  PDF
+                                  PDF A4
                                 </button>
 
                                 {inv.status === 'pendente' && debt > 0 && (

@@ -36,7 +36,9 @@ import {
   UserRoleType,
 } from '../types/models';
 import {
+  BLACK_FRIDAY_DISCOUNT_PERCENT,
   calcularDiasParaVencimento,
+  calcularPrecoCiclo,
   comprimirImagemParaBase64,
   exportarDadosExcel,
   exportarFluxoCaixaExcel,
@@ -1973,26 +1975,34 @@ export const OperationsModules: React.FC<OperationsModulesProps> = ({
           })()}
 
           <div className="flex flex-wrap items-center gap-2">
-            {plans.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => {
-                  if (onOpenMcxCheckout) {
-                    onOpenMcxCheckout(p.id, company.billingCycle);
-                  } else {
-                    onChangeCompanyPlan(p.id, company.billingCycle);
-                  }
-                }}
-                className={`px-3 py-1.5 rounded-lg font-semibold border transition-colors ${
-                  company.planId === p.id
-                    ? 'bg-slate-900 text-white border-slate-900 dark:bg-sky-600 dark:border-sky-600'
-                    : 'border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                }`}
-              >
-                Subscrever {p.name} ({formatKz(p.monthlyPriceKz)}/mês)
-              </button>
-            ))}
+            {plans.map((p) => {
+              const promoMonthly = calcularPrecoCiclo(p.monthlyPriceKz, 'mensal', true);
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    if (onOpenMcxCheckout) {
+                      onOpenMcxCheckout(p.id, company.billingCycle);
+                    } else {
+                      onChangeCompanyPlan(p.id, company.billingCycle);
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg font-semibold border transition-colors flex items-center gap-2 ${
+                    company.planId === p.id
+                      ? 'bg-slate-900 text-white border-slate-900 dark:bg-sky-600 dark:border-sky-600'
+                      : 'border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  <span>
+                    Subscrever {p.name} ({formatKz(promoMonthly)}/mês)
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold">
+                    -{BLACK_FRIDAY_DISCOUNT_PERCENT}% BF
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {multicaixaNotice && (

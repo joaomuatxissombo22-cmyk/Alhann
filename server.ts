@@ -1,9 +1,9 @@
 import express from 'express';
 import crypto from 'crypto';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
@@ -152,7 +152,6 @@ async function startServer() {
       return;
     }
 
-    // Service-specific mandatory field validations according to AGT specification
     if (serviceName === 'registarFactura') {
       const docNumber = String(payload.docNumber || '');
       const issueDate = String(payload.issueDate || '');
@@ -190,7 +189,6 @@ async function startServer() {
         : process.env.AGT_API_HOMOLOGATION_URL ||
           'https://portaldoparceiro.minfin.gov.ao/api/v2/facturacao-electronica';
 
-    // Strict Compliance Rule: Do NOT simulate positive validation responses from AGT when credentials are not active
     if (!hasProducerCredentials) {
       const operationId = `AGT-QUEUE-${Date.now().toString(36).toUpperCase()}`;
       res.status(200).json({
@@ -214,7 +212,6 @@ async function startServer() {
       return;
     }
 
-    // Real HTTPS transmission when official credentials are configured in .env
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 12000);
@@ -240,7 +237,6 @@ async function startServer() {
         parsedBody = { rawResponse: rawText.slice(0, 400) };
       }
 
-      // Receiving a request at AGT does NOT mean it is validated unless AGT explicitly returns validated status
       const remoteState = String(parsedBody.estado || parsedBody.status || '').toLowerCase();
       let mappedStatus = 'recebida_agt';
       if (!response.ok) {
@@ -283,7 +279,7 @@ async function startServer() {
     }
   });
 
-  // 3. Módulo 2: Multicaixa Express Payment Initiation (Modalidade A — EMIS Gateway / Fallback to Modalidade B)
+  // 3. Módulo 2: Multicaixa Express Payment Initiation
   app.post('/api/payments/mcx/initiate', async (req, res) => {
     const { orderReference, companyName, companyNif, planId, billingCycle, amountKz, clientPhone } =
       req.body as {
@@ -394,17 +390,20 @@ async function startServer() {
     });
   });
 
+  const distPath = path.join(__dirname, 'dist');
+  const distIndexHtml = path.join(distPath, 'index.html');
+
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(__dirname, 'dist');
+  } else if (fs.existsSync(distIndexHtml)) {
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      res.sendFile(distIndexHtml);
     });
   }
 
