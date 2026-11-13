@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import alhanLogoAsset from '../assets/images/alhan_logo.png';
 import {
   AgtTransmissionStatusType,
   BillingCycleType,
@@ -14,7 +15,7 @@ import {
   SubscriptionPlanConfig,
 } from '../types/models';
 
-export const ALHAN_OFFICIAL_LOGO_URL = '/assets/aistudio/alhan_digital-08_a6504d34.png';
+export const ALHAN_OFFICIAL_LOGO_URL = alhanLogoAsset || '/images/alhan_logo.png';
 export const MCX_EXPRESS_OFFICIAL_NUMBER = '927 496 287';
 export const MCX_EXPRESS_BENEFICIARY = 'ALHAN';
 

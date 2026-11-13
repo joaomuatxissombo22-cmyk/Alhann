@@ -1,8 +1,30 @@
+<IfModule mod_headers.c>
+  Header always set Link "</llms.txt>; rel=\"alternate\"; type=\"text/markdown\"; title=\"LLMs Documentation\", </.well-known/mcp/server-card.json>; rel=\"service-desc\"; type=\"application/json\"; title=\"MCP Server Card\", <https://plum-quetzal-938419.hostingersite.com/>; rel=\"canonical\""
+  Header merge Vary Accept
+</IfModule>
+
+<IfModule mod_mime.c>
+  AddType "text/plain; charset=utf-8" .txt
+  AddType "application/xml; charset=utf-8" .xml
+  AddType "application/json; charset=utf-8" .json
+</IfModule>
+
+ErrorDocument 404 /404.html
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
-  RewriteRule ^index\.html$ - [L]
-  RewriteCond %{REQUEST_FILENAME} !-f
-  RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule . /index.html [L]
+
+  # Serve Markdown when an agent sends Accept: text/markdown
+  RewriteCond %{HTTP_ACCEPT} text/markdown [NC]
+  RewriteCond %{REQUEST_URI} ^/(index\.html|about|contact|terms|privacy)?/?$ [NC]
+  RewriteRule ^ /llms.txt [T=text/markdown;charset=UTF-8,L]
+
+  # Serve existing files and directories directly
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Route known SPA paths to index.html; let unknown paths return a real HTTP 404
+  RewriteRule ^(about|sobre|contact|contactos|terms|termos|privacy|privacidade|pricing|planos|features|funcionalidades|faq|login|register|dashboard)/?$ /index.html [L]
 </IfModule>

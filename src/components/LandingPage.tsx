@@ -25,10 +25,22 @@ import {
   MCX_EXPRESS_OFFICIAL_NUMBER,
 } from '../lib/angolaUtils';
 import { PWAInstallButton } from './PWAInstallBanner';
+import heroAlhanLuandaImg from '../assets/images/hero_alhan_luanda_1794225056853.jpg';
+import featureAgtComplianceImg from '../assets/images/feature_agt_compliance_1794225057095.jpg';
+import avatarAngolaDirectorImg from '../assets/images/avatar_angola_director_1794225058343.jpg';
+
+declare module 'react' {
+  interface FormHTMLAttributes<T> extends HTMLAttributes<T> {
+    toolname?: string;
+    tooldescription?: string;
+  }
+}
 
 interface LandingPageProps {
   plans: SubscriptionPlanConfig[];
   onSignInGoogle: (selectedPlan?: PlanIdType, selectedCycle?: BillingCycleType) => Promise<void>;
+  onOpenLoginModal?: () => void;
+  onOpenRegisterModal?: (selectedPlan?: PlanIdType, selectedCycle?: BillingCycleType) => void;
   onEnterDemoMode: () => void;
   onOpenDocs: () => void;
   isSigningIn: boolean;
@@ -37,13 +49,15 @@ interface LandingPageProps {
 export const LandingPage: React.FC<LandingPageProps> = ({
   plans,
   onSignInGoogle,
+  onOpenLoginModal,
+  onOpenRegisterModal,
   onEnterDemoMode,
   onOpenDocs,
   isSigningIn,
 }) => {
   const [billingCycle, setBillingCycle] = useState<BillingCycleType>('mensal');
   const [openFaq, setOpenFaq] = useState<number | null>(0);
-  const [legalModal, setLegalModal] = useState<'termos' | 'privacidade' | null>(null);
+  const [legalModal, setLegalModal] = useState<'termos' | 'privacidade' | 'sobre' | null>(null);
   const [contactSent, setContactSent] = useState(false);
   const [contactForm, setContactForm] = useState({
     empresa: '',
@@ -143,14 +157,26 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </a>
         </nav>
 
-        {/* Zone 3: 1 primary action */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* Zone 3: Primary actions (Iniciar Sessão + Criar Conta) */}
+        <div className="flex items-center gap-2.5 shrink-0">
           <button
-            onClick={() => onSignInGoogle()}
+            type="button"
+            onClick={() => (onOpenLoginModal ? onOpenLoginModal() : onSignInGoogle())}
             disabled={isSigningIn}
-            className="px-4 py-2 text-xs font-semibold text-white bg-sky-600 rounded-lg hover:bg-sky-500 transition-colors whitespace-nowrap shrink-0"
+            className="px-4 py-2 text-xs font-semibold text-white bg-sky-600 rounded-lg hover:bg-sky-500 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             {isSigningIn ? 'A autenticar...' : 'Iniciar Sessão'}
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              onOpenRegisterModal
+                ? onOpenRegisterModal('profissional', 'mensal')
+                : onSignInGoogle('profissional', 'mensal')
+            }
+            className="hidden sm:inline-flex px-3.5 py-2 text-xs font-semibold text-slate-100 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            Criar Conta
           </button>
         </div>
       </header>
@@ -181,17 +207,31 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <div className="space-y-6 pt-2">
                 <div className="flex flex-wrap items-center gap-3">
                   <button
-                    onClick={() => onSignInGoogle('profissional', 'mensal')}
+                    type="button"
+                    onClick={() =>
+                      onOpenRegisterModal
+                        ? onOpenRegisterModal('profissional', 'mensal')
+                        : onSignInGoogle('profissional', 'mensal')
+                    }
                     disabled={isSigningIn}
-                    className="flex items-center gap-2 px-5 py-3 rounded-lg bg-sky-600 hover:bg-sky-500 text-sm font-semibold text-white transition-colors whitespace-nowrap shrink-0 shadow-sm"
+                    className="flex items-center gap-2 px-5 py-3 rounded-lg bg-sky-600 hover:bg-sky-500 text-sm font-semibold text-white transition-colors whitespace-nowrap shrink-0 shadow-sm cursor-pointer"
                   >
                     <span>Criar Conta Empresarial</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
 
                   <button
+                    type="button"
+                    onClick={() => (onOpenLoginModal ? onOpenLoginModal() : onSignInGoogle())}
+                    className="px-5 py-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sm font-semibold text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    Iniciar Sessão
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={onEnterDemoMode}
-                    className="px-5 py-3 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-sm font-semibold text-slate-100 transition-colors whitespace-nowrap shrink-0"
+                    className="px-5 py-3 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-sm font-semibold text-slate-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     Demonstração Interactiva do Sistema
                   </button>
@@ -207,8 +247,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <span>Fuso Horário Africa/Luanda</span>
                   <span aria-hidden="true">·</span>
                   <button
+                    type="button"
                     onClick={onOpenDocs}
-                    className="text-sky-400 hover:text-sky-300 underline underline-offset-4 font-medium"
+                    className="text-sky-400 hover:text-sky-300 underline underline-offset-4 font-medium cursor-pointer"
                   >
                     Documentação Hostinger VPS & API
                   </button>
@@ -221,9 +262,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <div className="relative w-full rounded-xl overflow-hidden border border-slate-800 bg-slate-900 flex flex-col justify-end min-h-[320px]">
                 {!heroImgError ? (
                   <img
-                    src="/src/assets/images/hero_alhan_luanda_1794225056853.jpg"
+                    src={heroAlhanLuandaImg || '/images/hero_alhan_luanda.jpg'}
                     alt="Sede Corporativa e Gestão Empresarial em Luanda, Angola"
-                    referrerPolicy="no-referrer"
                     onError={() => setHeroImgError(true)}
                     className="absolute inset-0 w-full h-full object-cover"
                   />
@@ -423,9 +463,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <div className="rounded-xl overflow-hidden border border-slate-700 bg-slate-800">
                 {!featureImgError ? (
                   <img
-                    src="/src/assets/images/feature_agt_compliance_1794225057095.jpg"
+                    src={featureAgtComplianceImg || '/images/feature_agt_compliance.jpg'}
                     alt="Controlo Financeiro e Conformidade Fiscal em Angola"
-                    referrerPolicy="no-referrer"
                     onError={() => setFeatureImgError(true)}
                     className="w-full h-56 object-cover"
                   />
@@ -438,9 +477,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <div className="flex items-center gap-3">
                     {!avatarImgError ? (
                       <img
-                        src="/src/assets/images/avatar_angola_director_1794225058343.jpg"
+                        src={avatarAngolaDirectorImg || '/images/avatar_angola_director.jpg'}
                         alt="Director Financeiro em Luanda"
-                        referrerPolicy="no-referrer"
                         onError={() => setAvatarImgError(true)}
                         className="w-11 h-11 rounded-full object-cover border border-slate-600 shrink-0"
                       />
@@ -482,16 +520,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 Subscreva pelo canal oficial Multicaixa Express ({MCX_EXPRESS_OFFICIAL_NUMBER} — Beneficiário: {MCX_EXPRESS_BENEFICIARY}) e garanta 60% de redução na sua subscrição empresarial.
               </p>
             </div>
-            <a
-              href="#planos"
-              onClick={(e) => {
-                e.preventDefault();
-                onSignInGoogle('profissional', billingCycle);
-              }}
-              className="px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs whitespace-nowrap shrink-0 text-center"
+            <button
+              type="button"
+              onClick={() =>
+                onOpenRegisterModal
+                  ? onOpenRegisterModal('profissional', billingCycle)
+                  : onSignInGoogle('profissional', billingCycle)
+              }
+              className="px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs whitespace-nowrap shrink-0 text-center cursor-pointer"
             >
               Aproveitar Black Friday (-60%)
-            </a>
+            </button>
           </div>
 
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
@@ -592,9 +631,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
                   <div className="pt-6 mt-6 border-t border-slate-200/20">
                     <button
-                      onClick={() => onSignInGoogle(plan.id, billingCycle)}
+                      type="button"
+                      onClick={() =>
+                        onOpenRegisterModal
+                          ? onOpenRegisterModal(plan.id, billingCycle)
+                          : onSignInGoogle(plan.id, billingCycle)
+                      }
                       disabled={isSigningIn}
-                      className={`w-full py-2.5 px-4 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                      className={`w-full py-2.5 px-4 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                         isHighlighted
                           ? 'bg-sky-600 hover:bg-sky-500 text-white'
                           : 'bg-slate-900 hover:bg-slate-800 text-white'
@@ -754,7 +798,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   </p>
                 </div>
               ) : (
-                <form onSubmit={handleContactSubmit} className="space-y-3 text-xs">
+                <form
+                  onSubmit={handleContactSubmit}
+                  toolname="request_alhan_commercial_proposal"
+                  tooldescription="Solicita proposta comercial ou demonstração técnica do software ALHAN FACTURA para empresas em Angola."
+                  className="space-y-3 text-xs"
+                >
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">
                       Nome da Empresa *
@@ -847,31 +896,78 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Propriedade de <strong>ALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA</strong> · Luanda, República de Angola
             </p>
             <p>
-              Contactos Oficiais: +244 922 021 211 · facturao@alhan.pro · Multicaixa Express: {MCX_EXPRESS_OFFICIAL_NUMBER} ({MCX_EXPRESS_BENEFICIARY})
+              Contactos Oficiais:{' '}
+              <a href="tel:+244922021211" className="text-sky-400 hover:underline">
+                +244 922 021 211
+              </a>{' '}
+              ·{' '}
+              <a href="mailto:facturao@alhan.pro" className="text-sky-400 hover:underline">
+                facturao@alhan.pro
+              </a>{' '}
+              · Multicaixa Express:{' '}
+              <a href="tel:+244927496287" className="text-amber-400 hover:underline font-mono">
+                {MCX_EXPRESS_OFFICIAL_NUMBER}
+              </a>{' '}
+              ({MCX_EXPRESS_BENEFICIARY})
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-5">
-            <button
-              onClick={() => setLegalModal('termos')}
+          <div className="flex flex-wrap items-center gap-4">
+            <a
+              href="/about"
+              onClick={(e) => {
+                e.preventDefault();
+                setLegalModal('sobre');
+              }}
+              className="hover:text-white transition-colors"
+            >
+              Sobre Nós
+            </a>
+            <a
+              href="/contact"
+              onClick={(e) => {
+                e.preventDefault();
+                document.getElementById('suporte')?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="hover:text-white transition-colors"
+            >
+              Contactos
+            </a>
+            <a
+              href="/terms"
+              onClick={(e) => {
+                e.preventDefault();
+                setLegalModal('termos');
+              }}
               className="hover:text-white transition-colors"
             >
               Termos de Utilização
-            </button>
-            <button
-              onClick={() => setLegalModal('privacidade')}
+            </a>
+            <a
+              href="/privacy"
+              onClick={(e) => {
+                e.preventDefault();
+                setLegalModal('privacidade');
+              }}
               className="hover:text-white transition-colors"
             >
               Política de Privacidade e Criptografia
-            </button>
-            <button onClick={onOpenDocs} className="hover:text-white transition-colors">
+            </a>
+            <a href="/llms.txt" className="hover:text-white transition-colors font-mono">
+              llms.txt
+            </a>
+            <button
+              type="button"
+              onClick={onOpenDocs}
+              className="hover:text-white transition-colors cursor-pointer"
+            >
               Implantação Hostinger & API
             </button>
           </div>
         </div>
       </footer>
 
-      {/* Legal Modal (Terms of Use & Privacy Policy) */}
+      {/* Legal & About Modal */}
       {legalModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
           <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-2xl space-y-4 max-h-[80vh] overflow-y-auto">
@@ -879,9 +975,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <h3 className="text-base font-bold text-slate-900">
                 {legalModal === 'termos'
                   ? 'Termos e Condições de Utilização — ALHAN FACTURA'
+                  : legalModal === 'sobre'
+                  ? 'Sobre a ALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA'
                   : 'Política de Privacidade, Protecção de Dados e Criptografia'}
               </h3>
               <button
+                type="button"
                 onClick={() => setLegalModal(null)}
                 className="text-xs font-semibold text-slate-500 hover:text-slate-900"
               >
@@ -900,6 +999,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <strong>3. Estado de Certificação AGT:</strong> Até à conclusão do processo formal de certificação junto da Administração Geral Tributária (AGT), o módulo de transmissão opera em modo de PREPARAÇÃO PARA CERTIFICAÇÃO AGT, não devendo nenhuma emissão ser apresentada como validada fiscalmente pela AGT antes da activação das credenciais oficiais de produção.
                 </p>
               </div>
+            ) : legalModal === 'sobre' ? (
+              <div className="text-xs text-slate-600 space-y-3 leading-relaxed">
+                <p>
+                  A <strong>ALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA</strong> é uma empresa angolana sediada em Luanda, especializada no desenvolvimento de soluções empresariais de facturação electrónica, gestão comercial, inventário e conformidade fiscal com a Administração Geral Tributária (AGT).
+                </p>
+                <p>
+                  O sistema <strong>ALHAN FACTURA</strong> suporta emissão em formato A4 e Talão Térmico (80mm Computador / 58mm Telemóvel), cálculo automático de IVA de 14% e Retenção na Fonte de 6,5%, exportação SAF-T (AO) e subscrição via Multicaixa Express (<strong>{MCX_EXPRESS_OFFICIAL_NUMBER} — Beneficiário: {MCX_EXPRESS_BENEFICIARY}</strong>).
+                </p>
+              </div>
             ) : (
               <div className="text-xs text-slate-600 space-y-3 leading-relaxed">
                 <p>
@@ -915,6 +1023,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             )}
             <div className="pt-3 border-t border-slate-200 flex justify-end">
               <button
+                type="button"
                 onClick={() => setLegalModal(null)}
                 className="px-4 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold"
               >

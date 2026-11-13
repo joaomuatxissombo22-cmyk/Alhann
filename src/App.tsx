@@ -93,6 +93,7 @@ import {
   valorPorExtensoKz,
 } from './lib/angolaUtils';
 import { LandingPage } from './components/LandingPage';
+import { AuthModal } from './components/AuthModal';
 import { CompanyRegistrationModal } from './components/CompanyRegistrationModal';
 import { InvoiceModal } from './components/InvoiceModal';
 import { DocumentationModal } from './components/DocumentationModal';
@@ -138,6 +139,10 @@ export default function App() {
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [pendingUserEmail, setPendingUserEmail] = useState('');
+  const [pendingUserName, setPendingUserName] = useState('');
 
   const [selectedPlanOnLanding, setSelectedPlanOnLanding] = useState<PlanIdType>('profissional');
   const [selectedCycleOnLanding, setSelectedCycleOnLanding] = useState<BillingCycleType>('mensal');
@@ -375,11 +380,48 @@ export default function App() {
     try {
       await signInWithPopup(auth, googleProvider);
       setIsDemoMode(false);
+      setIsAuthModalOpen(false);
+      setIsRegisterModalOpen(false);
     } catch (err) {
-      console.error('Erro na autenticação Google:', err);
+      console.warn('Popup Google indisponível neste domínio; a abrir acesso directo:', err);
+      if (plan) {
+        setIsAuthModalOpen(false);
+        setIsRegisterModalOpen(true);
+      } else {
+        setIsAuthModalOpen(true);
+      }
     } finally {
       setIsSigningIn(false);
     }
+  };
+
+  const handleDirectLoginSuccess = async (email: string, name: string, nifInput?: string) => {
+    setIsAuthModalOpen(false);
+    await handleEnterDemoMode();
+    try {
+      const savedRaw = localStorage.getItem('alhan_registered_company_v1');
+      if (savedRaw) {
+        const savedComp = JSON.parse(savedRaw) as Company;
+        if (savedComp && savedComp.name) {
+          setCompanies([savedComp]);
+          return;
+        }
+      }
+    } catch {
+      // ignore localStorage parse error
+    }
+    setCompanies((prev) =>
+      prev.map((c, idx) =>
+        idx === 0
+          ? {
+              ...c,
+              email: email || c.email,
+              responsibleName: name || c.responsibleName,
+              nif: nifInput && !nifInput.includes('@') ? nifInput : c.nif,
+            }
+          : c
+      )
+    );
   };
 
   // Interactive Demo Mode Seeder (for instant exploration from Landing Page)
@@ -968,15 +1010,59 @@ export default function App() {
     }
   };
 
-  // Register Company & Seed Initial Data in Firestore
+  // Register Company & Seed Initial Data in Firestore + Local Hostinger Session
   const handleRegisterCompany = async (
     companyData: Omit<Company, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>,
     seedInitialData: boolean
   ) => {
-    if (!currentUser) return;
-    const uid = currentUser.uid;
+    const uid = currentUser?.uid || 'local_owner_ao';
     const compId = sanitizeId('comp');
     const today = getLuandaIsoDate();
+    const newCompanyObj: Company = {
+      id: compId,
+      ownerId: uid,
+      ...companyData,
+    };
+
+    try {
+      localStorage.setItem('alhan_registered_company_v1', JSON.stringify(newCompanyObj));
+    } catch {
+      // ignore storage quota errors
+    }
+
+    // Always seed local state first so the user immediately enters their company panel even on Hostinger without Google OAuth
+    if (!currentUser) {
+      if (seedInitialData) {
+        await handleEnterDemoMode();
+      } else {
+        setClients([]);
+        setProducts([]);
+        setInvoices([]);
+        setMovements([]);
+        setTransactions([]);
+        setSuppliers([]);
+        setTeamMembers([
+          {
+            id: sanitizeId('tm'),
+            ownerId: uid,
+            companyId: compId,
+            name: companyData.responsibleName,
+            email: companyData.email,
+            role: 'Administrador',
+            establishment: 'Sede Principal',
+            permissionsSummary:
+              'Acesso Total: Facturação, SAF-T, AGT, Financeiro, Stock, Utilizadores e Configurações',
+            status: 'activo',
+          },
+        ]);
+      }
+      setCompanies([newCompanyObj]);
+      setIsDemoMode(true);
+      setIsRegisterModalOpen(false);
+      setIsAuthModalOpen(false);
+      setActiveTab('dashboard');
+      return;
+    }
 
     try {
       await setDoc(doc(db, 'companies', compId), {
@@ -1191,6 +1277,7 @@ export default function App() {
           compId
         );
       }
+      setIsRegisterModalOpen(false);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `companies/${compId}`);
     }
@@ -1724,6 +1811,28 @@ export default function App() {
     }
   }, [activeRoleView, isCentralAlhanAdmin]);
 
+  // Render Company Registration Wizard if user opened registration modal OR is authenticated without a company
+  if (isRegisterModalOpen || (currentUser && !isDemoMode && companies.length === 0)) {
+    return (
+      <>
+        <CompanyRegistrationModal
+          userEmail={currentUser?.email || pendingUserEmail || ''}
+          userName={currentUser?.displayName || pendingUserName || ''}
+          defaultPlan={selectedPlanOnLanding}
+          defaultCycle={selectedCycleOnLanding}
+          onRegisterCompany={handleRegisterCompany}
+          onSignOut={() => {
+            setIsRegisterModalOpen(false);
+            if (currentUser) {
+              signOut(auth);
+            }
+          }}
+        />
+        <OfflineIndicator pendingSyncCount={offlineQueueCount} />
+      </>
+    );
+  }
+
   // Render Landing Page if not logged in and not in Demo Mode
   if (!currentUser && !isDemoMode) {
     return (
@@ -1731,28 +1840,32 @@ export default function App() {
         <LandingPage
           plans={plans}
           onSignInGoogle={handleSignInGoogle}
+          onOpenLoginModal={() => setIsAuthModalOpen(true)}
+          onOpenRegisterModal={(plan, cycle) => {
+            if (plan) setSelectedPlanOnLanding(plan);
+            if (cycle) setSelectedCycleOnLanding(cycle);
+            setIsAuthModalOpen(false);
+            setIsRegisterModalOpen(true);
+          }}
           onEnterDemoMode={handleEnterDemoMode}
           onOpenDocs={() => setIsDocsOpen(true)}
           isSigningIn={isSigningIn}
         />
-        <DocumentationModal isOpen={isDocsOpen} onClose={() => setIsDocsOpen(false)} />
-        <OfflineIndicator pendingSyncCount={offlineQueueCount} />
-      </>
-    );
-  }
-
-  // Render Company Registration Wizard if user is authenticated but hasn't created their company yet
-  if (currentUser && !isDemoMode && companies.length === 0) {
-    return (
-      <>
-        <CompanyRegistrationModal
-          userEmail={currentUser.email || ''}
-          userName={currentUser.displayName || ''}
-          defaultPlan={selectedPlanOnLanding}
-          defaultCycle={selectedCycleOnLanding}
-          onRegisterCompany={handleRegisterCompany}
-          onSignOut={() => signOut(auth)}
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          onLoginSuccess={handleDirectLoginSuccess}
+          onOpenRegisterCompany={(email, name) => {
+            if (email) setPendingUserEmail(email);
+            if (name) setPendingUserName(name);
+            setIsAuthModalOpen(false);
+            setIsRegisterModalOpen(true);
+          }}
+          onTryGoogleSignIn={() => handleSignInGoogle()}
+          onEnterDemoMode={handleEnterDemoMode}
+          isSigningInGoogle={isSigningIn}
         />
+        <DocumentationModal isOpen={isDocsOpen} onClose={() => setIsDocsOpen(false)} />
         <OfflineIndicator pendingSyncCount={offlineQueueCount} />
       </>
     );

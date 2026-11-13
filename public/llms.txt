@@ -1,0 +1,27 @@
+# ALHAN FACTURA
+
+> Software Profissional SaaS de Facturação Electrónica, Exportação SAF-T (AO), Integração Oficial AGT (IVA 14% e Retenção na Fonte 6,5%) e Pagamentos Multicaixa Express para Empresas em Angola, desenvolvido por ALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA.
+
+O ALHAN FACTURA é uma plataforma de gestão comercial, facturação electrónica (formato A4 e Talão Térmico 80mm/58mm), controlo de stock, tesouraria e conformidade tributária desenhada especificamente para a realidade fiscal da República de Angola (Decreto Presidencial n.º 71/25 da Administração Geral Tributária — AGT).
+
+- Entidade Proprietária: ALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA (Luanda, Angola)
+- Moeda Padrão: Kwanza Angolano (Kz / AOA)
+- Impostos Suportados: IVA Taxa Normal 14% (7%, 5% ou Isento) e Retenção na Fonte de 6,5% (Imposto Industrial)
+- Promoção Activa: Black Friday -60% em todos os planos de subscrição e módulo promocional nas facturas emitidas
+- Canal Oficial de Pagamento Multicaixa Express: 927 496 287 (Beneficiário: ALHAN)
+- Contactos Oficiais: Telefone +244 922 021 211 / +244 927 496 287 | E-mail: facturao@alhan.pro
+
+## Páginas Principais
+
+- [Página Inicial ALHAN FACTURA](https://plum-quetzal-938419.hostingersite.com/): Apresentação completa do software de facturação electrónica, planos com desconto Black Friday de 60%, calculadora fiscal e demonstração interactiva.
+- [Sobre a ALHAN Consultoria](https://plum-quetzal-938419.hostingersite.com/about): Missão, arquitectura SaaS multi-empresa e compromisso com a conformidade fiscal junto da AGT em Angola.
+- [Contactos Comerciais e Suporte Técnico](https://plum-quetzal-938419.hostingersite.com/contact): Atendimento comercial e apoio técnico em Luanda (+244 922 021 211, +244 927 496 287, facturao@alhan.pro).
+- [Termos e Condições de Utilização](https://plum-quetzal-938419.hostingersite.com/terms): Regras contratuais do serviço SaaS, imutabilidade de documentos fiscais e preparação para certificação AGT.
+- [Política de Privacidade e Criptografia](https://plum-quetzal-938419.hostingersite.com/privacy): Isolamento multi-tenant, encriptação TLS 1.3 / AES-256 e conservação legal de ficheiros SAF-T (AO).
+
+## Recursos para Agentes e Integrações Técnicas
+
+- [MCP Server Card (SEP-1649)](https://plum-quetzal-938419.hostingersite.com/.well-known/mcp/server-card.json): Declaração oficial de capacidades Model Context Protocol (MCP) e ferramentas disponíveis.
+- [Endpoint MCP JSON-RPC](https://plum-quetzal-938419.hostingersite.com/api/mcp): Endpoint de execução de ferramentas para cálculo de IVA 14%, Retenção 6,5% e consulta de planos em Kwanzas (AOA).
+- [Estado da Integração AGT](https://plum-quetzal-938419.hostingersite.com/api/agt/status): Estado técnico dos serviços de facturação electrónica (`registarFactura`, `obterEstado`, `listarFacturas`, `consultarFactura`, `solicitarSerie`, `listarSeries`, `validarDocumento`).
+- [Mapa do Site XML](https://plum-quetzal-938419.hostingersite.com/sitemap.xml): Lista estruturada de URLs públicas para indexação por motores de busca e agentes.

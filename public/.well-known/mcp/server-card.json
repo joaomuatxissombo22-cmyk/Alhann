@@ -1,0 +1,83 @@
+{
+  "schemaVersion": "1.0",
+  "protocolVersion": "2025-03-26",
+  "name": "alhan-factura-mcp-server",
+  "title": "ALHAN FACTURA — Servidor MCP de Facturação Electrónica e Gestão Fiscal (Angola)",
+  "version": "1.0.0",
+  "description": "Servidor Model Context Protocol (MCP / SEP-1649) do software ALHAN FACTURA (ALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA). Permite calcular impostos angolanos (IVA 14%, Retenção na Fonte 6,5%, Promoção Black Friday 60%), consultar planos de subscrição em Kwanzas (AOA) e verificar os serviços de integração com a AGT.",
+  "homepageUrl": "https://plum-quetzal-938419.hostingersite.com/",
+  "documentationUrl": "https://plum-quetzal-938419.hostingersite.com/llms.txt",
+  "endpoint": "https://plum-quetzal-938419.hostingersite.com/api/mcp",
+  "endpoints": {
+    "http": "https://plum-quetzal-938419.hostingersite.com/api/mcp",
+    "sse": "https://plum-quetzal-938419.hostingersite.com/api/mcp"
+  },
+  "transport": {
+    "type": "streamable-http",
+    "url": "https://plum-quetzal-938419.hostingersite.com/api/mcp"
+  },
+  "vendor": {
+    "name": "ALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA",
+    "url": "https://plum-quetzal-938419.hostingersite.com/about",
+    "email": "facturao@alhan.pro",
+    "telephone": "+244922021211"
+  },
+  "capabilities": {
+    "tools": {
+      "listChanged": false
+    },
+    "resources": {
+      "subscribe": false,
+      "listChanged": false
+    },
+    "prompts": {
+      "listChanged": false
+    }
+  },
+  "tools": [
+    {
+      "name": "calculate_angola_invoice_taxes",
+      "description": "Calcula o resumo fiscal de uma factura em Angola em Kwanzas (AOA), incluindo IVA de 14%, Retenção na Fonte de 6,5% (Imposto Industrial) e desconto promocional Black Friday de 60%.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grossAmountKz": {
+            "type": "number",
+            "description": "Valor ilíquido bruto em Kwanzas (AOA) antes de descontos e impostos."
+          },
+          "applyBlackFriday60": {
+            "type": "boolean",
+            "description": "Se verdadeiro, aplica o desconto promocional Black Friday de 60%."
+          },
+          "applyWithholding65": {
+            "type": "boolean",
+            "description": "Se verdadeiro, aplica a Retenção na Fonte de 6,5% (Imposto Industrial)."
+          }
+        },
+        "required": ["grossAmountKz"]
+      }
+    },
+    {
+      "name": "get_alhan_subscription_plans",
+      "description": "Devolve a lista de planos de subscrição do ALHAN FACTURA (Básico, Profissional, Empresarial) em Kwanzas (AOA) com o desconto de 60% Black Friday e dados de pagamento Multicaixa Express (927 496 287 — ALHAN).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "billingCycle": {
+            "type": "string",
+            "enum": ["mensal", "trimestral", "semestral", "anual"],
+            "description": "Ciclo de facturação pretendido."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_agt_integration_services",
+      "description": "Lista os 7 serviços oficiais da API de Facturação Electrónica da AGT suportados pelo ALHAN FACTURA.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}
