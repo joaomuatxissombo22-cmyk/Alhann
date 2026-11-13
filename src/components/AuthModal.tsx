@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Building2, CheckCircle2, KeyRound, Lock, LogIn, Mail, ShieldCheck, UserPlus, X } from 'lucide-react';
+import { Building2, CheckCircle2, Lock, LogIn, Mail, ShieldCheck, UserPlus, X } from 'lucide-react';
 import {
   ALHAN_OFFICIAL_LOGO_URL,
   MCX_EXPRESS_BENEFICIARY,
@@ -18,7 +18,6 @@ interface AuthModalProps {
   onLoginSuccess: (email: string, name: string, nif?: string) => void;
   onOpenRegisterCompany: (email?: string, name?: string) => void;
   onTryGoogleSignIn: () => Promise<void>;
-  onOpenAdminGate?: () => void;
   onMasterAdminDirectLogin?: () => void;
   isSigningInGoogle: boolean;
 }
@@ -29,7 +28,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onLoginSuccess,
   onOpenRegisterCompany,
   onTryGoogleSignIn,
-  onOpenAdminGate,
   onMasterAdminDirectLogin,
   isSigningInGoogle,
 }) => {
@@ -277,20 +275,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <ShieldCheck className="w-4 h-4 text-sky-600" />
               <span>{isSigningInGoogle ? 'A ligar Google...' : 'Autenticar com Conta Google'}</span>
             </button>
-
-            {onOpenAdminGate && (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onOpenAdminGate();
-                }}
-                className="w-full py-2 px-3 rounded-lg bg-slate-950 hover:bg-slate-900 text-amber-400 font-semibold transition-colors flex items-center justify-center gap-2 text-[11px]"
-              >
-                <KeyRound className="w-3.5 h-3.5" />
-                <span>Entrar no Painel ADM (Administração Central ALHAN)</span>
-              </button>
-            )}
           </div>
         </div>
       </div>

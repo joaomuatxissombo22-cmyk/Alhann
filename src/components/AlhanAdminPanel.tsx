@@ -238,11 +238,12 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
   const currentOrigin =
     typeof window !== 'undefined'
       ? window.location.origin
-      : 'https://plum-quetzal-938419.hostingersite.com';
-  const hiddenAdminPrimaryLink = `${currentOrigin}/painel-adm-alhan`;
-  const hiddenAdminQueryLink = `${currentOrigin}/?adm=alhan`;
-  const hostingerHiddenLink = 'https://plum-quetzal-938419.hostingersite.com/painel-adm-alhan';
-  const hostingerQueryLink = 'https://plum-quetzal-938419.hostingersite.com/?adm=alhan';
+      : 'https://factura.alhan.pro';
+  const hiddenAdminPrimaryLink = 'https://factura.alhan.pro/painel-adm-alhan';
+  const hiddenAdminQueryLink = 'https://factura.alhan.pro/?painel=adm-alhan';
+  const hostingerHiddenLink = 'https://factura.alhan.pro/painel-adm-alhan';
+  const hostingerQueryLink = 'https://factura.alhan.pro/?painel=adm-alhan';
+  const localEnvHiddenLink = `${currentOrigin}/painel-adm-alhan`;
 
   const handleCopyText = (text: string, label: string) => {
     if (navigator.clipboard) {
@@ -1692,7 +1693,7 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
               <div className="space-y-3">
                 <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1.5">
                   <p className="font-semibold text-slate-700 dark:text-slate-300">
-                    1. Link Oculto Principal (Hostinger Produção):
+                    1. Link Privado Principal do Painel ADM (Produção):
                   </p>
                   <div className="flex items-center justify-between gap-2">
                     <code className="font-mono text-sky-700 dark:text-sky-400 break-all">
@@ -1703,7 +1704,7 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
                       onClick={() =>
                         handleCopyText(
                           hostingerHiddenLink,
-                          `Link Hostinger copiado: ${hostingerHiddenLink}`
+                          `Link Privado copiado: ${hostingerHiddenLink}`
                         )
                       }
                       className="px-2.5 py-1 rounded bg-slate-900 text-white font-semibold shrink-0"
@@ -1715,7 +1716,7 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
 
                 <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1.5">
                   <p className="font-semibold text-slate-700 dark:text-slate-300">
-                    2. Link Alternativo Universal (Compatível c/ qualquer servidor estático):
+                    2. Link Privado Alternativo Universal (Parâmetro Directo):
                   </p>
                   <div className="flex items-center justify-between gap-2">
                     <code className="font-mono text-sky-700 dark:text-sky-400 break-all">
@@ -1742,14 +1743,14 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
                   </p>
                   <div className="flex items-center justify-between gap-2">
                     <code className="font-mono text-emerald-700 dark:text-emerald-400 break-all">
-                      {hiddenAdminPrimaryLink}
+                      {localEnvHiddenLink}
                     </code>
                     <button
                       type="button"
                       onClick={() =>
                         handleCopyText(
-                          hiddenAdminPrimaryLink,
-                          `Link copiado: ${hiddenAdminPrimaryLink}`
+                          localEnvHiddenLink,
+                          `Link copiado: ${localEnvHiddenLink}`
                         )
                       }
                       className="px-2.5 py-1 rounded bg-slate-900 text-white font-semibold shrink-0"
@@ -2085,7 +2086,7 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 space-y-2 font-mono">
               <p>
                 <span className="text-slate-400">Link do Sistema:</span>{' '}
-                <strong>https://plum-quetzal-938419.hostingersite.com/</strong>
+                <strong>https://factura.alhan.pro/</strong>
               </p>
               <p>
                 <span className="text-slate-400">Utilizador (E-mail ou NIF):</span>{' '}
@@ -2125,7 +2126,7 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
               <a
                 href={`https://wa.me/${selectedClientForAccess.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                  `Olá ${selectedClientForAccess.responsibleName} (${selectedClientForAccess.name}),\n\nA sua licença do software *ALHAN FACTURA* (Plano ${selectedClientForAccess.planId.toUpperCase()} - ${selectedClientForAccess.billingCycle.toUpperCase()}) está *${selectedClientForAccess.subscriptionStatus.toUpperCase()}*!\n\n🔗 *Link de Acesso:* https://plum-quetzal-938419.hostingersite.com/\n👤 *Utilizador:* ${selectedClientForAccess.email} (ou NIF ${selectedClientForAccess.nif})\n🔑 *Senha:* ${customClientPassInput}\n📅 *Validade:* ${selectedClientForAccess.subscriptionEndDate || 'Activa'}\n\nSuporte Técnico ALHAN: +244 922 021 211 | facturao@alhan.pro`
+                  `Olá ${selectedClientForAccess.responsibleName} (${selectedClientForAccess.name}),\n\nA sua licença do software *ALHAN FACTURA* (Plano ${selectedClientForAccess.planId.toUpperCase()} - ${selectedClientForAccess.billingCycle.toUpperCase()}) está *${selectedClientForAccess.subscriptionStatus.toUpperCase()}*!\n\n🔗 *Link de Acesso:* https://factura.alhan.pro/\n👤 *Utilizador:* ${selectedClientForAccess.email} (ou NIF ${selectedClientForAccess.nif})\n🔑 *Senha:* ${customClientPassInput}\n📅 *Validade:* ${selectedClientForAccess.subscriptionEndDate || 'Activa'}\n\nSuporte Técnico ALHAN: +244 922 021 211 | facturao@alhan.pro`
                 )}`}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -2137,7 +2138,7 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
                 href={`mailto:${selectedClientForAccess.email}?subject=${encodeURIComponent(
                   `Dados de Acesso ALHAN FACTURA — ${selectedClientForAccess.name}`
                 )}&body=${encodeURIComponent(
-                  `Exmo(a). ${selectedClientForAccess.responsibleName},\nEmpresa: ${selectedClientForAccess.name} (NIF: ${selectedClientForAccess.nif})\n\nA sua subscrição do software de facturação electrónica ALHAN FACTURA encontra-se ${selectedClientForAccess.subscriptionStatus.toUpperCase()}.\n\nLink de Acesso: https://plum-quetzal-938419.hostingersite.com/\nUtilizador: ${selectedClientForAccess.email} (ou NIF ${selectedClientForAccess.nif})\nPalavra-passe: ${customClientPassInput}\nPlano: ${selectedClientForAccess.planId.toUpperCase()} (${selectedClientForAccess.billingCycle.toUpperCase()})\nValidade: ${selectedClientForAccess.subscriptionEndDate || 'Activa'}\n\nALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA\nTel: +244 922 021 211 | facturao@alhan.pro`
+                  `Exmo(a). ${selectedClientForAccess.responsibleName},\nEmpresa: ${selectedClientForAccess.name} (NIF: ${selectedClientForAccess.nif})\n\nA sua subscrição do software de facturação electrónica ALHAN FACTURA encontra-se ${selectedClientForAccess.subscriptionStatus.toUpperCase()}.\n\nLink de Acesso: https://factura.alhan.pro/\nUtilizador: ${selectedClientForAccess.email} (ou NIF ${selectedClientForAccess.nif})\nPalavra-passe: ${customClientPassInput}\nPlano: ${selectedClientForAccess.planId.toUpperCase()} (${selectedClientForAccess.billingCycle.toUpperCase()})\nValidade: ${selectedClientForAccess.subscriptionEndDate || 'Activa'}\n\nALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA\nTel: +244 922 021 211 | facturao@alhan.pro`
                 )}`}
                 className="py-2.5 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-center"
               >

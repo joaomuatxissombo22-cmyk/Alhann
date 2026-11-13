@@ -3,15 +3,20 @@ import { QRCodeSVG } from 'qrcode.react';
 import {
   CheckCircle2,
   Download,
+  Eye,
   FileText,
   Mail,
   MessageCircle,
   Monitor,
   Printer,
   Receipt,
+  Ruler,
+  Scissors,
   ShieldCheck,
   Smartphone,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { Company, Invoice, InvoiceLineItem } from '../types/models';
 import {
@@ -38,6 +43,9 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   onIncrementPrintCount,
 }) => {
   const [format, setFormat] = useState<'A4' | 'TERMICO_80MM' | 'TERMICO_58MM'>('A4');
+  const [isPrintPreviewMode, setIsPrintPreviewMode] = useState<boolean>(true);
+  const [previewZoom, setPreviewZoom] = useState<number>(100);
+  const [showPrintGuides, setShowPrintGuides] = useState<boolean>(true);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
   if (!invoice) return null;
@@ -56,7 +64,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   const agtStateInfo =
     AGT_STATE_LABELS[invoice.agtTransmissionStatus] || AGT_STATE_LABELS.pendente_transmissao;
 
-  const handlePrint = async () => {
+  const handleConfirmFinalPrint = async () => {
     await onIncrementPrintCount(invoice);
     window.print();
   };
@@ -123,17 +131,42 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   const isMobile58 = format === 'TERMICO_58MM';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-2 sm:p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-2 sm:p-4 overflow-y-auto">
+      {/* Dynamic @page CSS rule matching the active preview format (A4 vs Thermal 80mm/58mm) */}
+      <style>
+        {format === 'A4'
+          ? `@media print { @page { size: A4 portrait; margin: 8mm; } }`
+          : format === 'TERMICO_80MM'
+          ? `@media print { @page { size: 80mm auto; margin: 2mm; } }`
+          : `@media print { @page { size: 58mm auto; margin: 2mm; } }`}
+      </style>
+
       <div className="w-full max-w-5xl my-auto space-y-3">
         {/* Top Action Bar (Hidden when printing) */}
         <div className="no-print flex flex-wrap items-center justify-between gap-2 bg-slate-900 text-white px-4 py-3 rounded-xl border border-slate-800 shadow-lg">
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
+              onClick={() => setIsPrintPreviewMode(!isPrintPreviewMode)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors border ${
+                isPrintPreviewMode
+                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
+                  : 'bg-slate-800 text-amber-400 border-slate-700 hover:bg-slate-700'
+              }`}
+              title="Activar / Desactivar Modo de Pré-Visualização de Impressão (Print Preview)"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Print Preview {isPrintPreviewMode ? 'Activo' : ''}</span>
+            </button>
+
+            <div className="h-4 w-px bg-slate-700 mx-1 hidden sm:block" />
+
+            <button
+              type="button"
               onClick={() => setFormat('A4')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                 format === 'A4'
-                  ? 'bg-sky-600 text-white'
+                  ? 'bg-sky-600 text-white shadow-xs'
                   : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
               }`}
             >
@@ -146,12 +179,12 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
               onClick={() => setFormat('TERMICO_80MM')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                 format === 'TERMICO_80MM'
-                  ? 'bg-sky-600 text-white'
+                  ? 'bg-sky-600 text-white shadow-xs'
                   : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
               }`}
             >
               <Monitor className="w-3.5 h-3.5" />
-              <span>Talão Térmico 80mm (Computador)</span>
+              <span>Talão Térmico 80mm (POS)</span>
             </button>
 
             <button
@@ -159,12 +192,12 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
               onClick={() => setFormat('TERMICO_58MM')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                 format === 'TERMICO_58MM'
-                  ? 'bg-sky-600 text-white'
+                  ? 'bg-sky-600 text-white shadow-xs'
                   : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
               }`}
             >
               <Smartphone className="w-3.5 h-3.5" />
-              <span>Talão Térmico 58mm (Móvel)</span>
+              <span>58mm (Móvel)</span>
             </button>
           </div>
 
@@ -184,13 +217,13 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
             >
               <Receipt className="w-3.5 h-3.5" />
-              <span>PDF Talão Térmico</span>
+              <span>PDF Térmico</span>
             </button>
 
             <button
               type="button"
-              onClick={handlePrint}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors"
+              onClick={handleConfirmFinalPrint}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-sm"
             >
               <Printer className="w-3.5 h-3.5" />
               <span>Imprimir ({isOriginal ? 'ORIGINAL' : '2.ª VIA'})</span>
@@ -224,6 +257,126 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
           </div>
         </div>
 
+        {/* Dedicated Print Preview Studio Control Bar (Toggles dynamically between A4 and Thermal 80mm before printing) */}
+        {isPrintPreviewMode && (
+          <div className="no-print bg-slate-900/95 border border-amber-500/40 rounded-xl p-3.5 text-xs text-slate-200 shadow-xl space-y-3">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              {/* Left: Dynamic A4 vs Thermal 80mm Switcher */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono text-[10px] font-bold uppercase">
+                  MODO PRINT PREVIEW
+                </span>
+                <span className="text-slate-300 font-semibold">
+                  Alternar Formato antes de Imprimir:
+                </span>
+
+                <div className="inline-flex rounded-lg bg-slate-950 p-1 border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setFormat('A4')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+                      format === 'A4'
+                        ? 'bg-sky-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Layout A4 (210 × 297 mm)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormat('TERMICO_80MM')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+                      format === 'TERMICO_80MM'
+                        ? 'bg-sky-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Receipt className="w-3.5 h-3.5" />
+                    <span>Layout Térmico 80mm (POS)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Right: Zoom Controls, Margin Guides & Final Print Trigger */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Zoom Selector */}
+                <div className="flex items-center gap-1 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewZoom((z) => Math.max(75, z - 10))}
+                    className="p-1 text-slate-400 hover:text-white"
+                    title="Reduzir Zoom da Pré-visualização"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="font-mono text-[11px] font-bold px-1.5 text-sky-400">
+                    {previewZoom}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewZoom((z) => Math.min(125, z + 10))}
+                    className="p-1 text-slate-400 hover:text-white"
+                    title="Aumentar Zoom da Pré-visualização"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                  {previewZoom !== 100 && (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewZoom(100)}
+                      className="text-[10px] text-slate-400 hover:text-white underline ml-1"
+                    >
+                      100%
+                    </button>
+                  )}
+                </div>
+
+                {/* Guides Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setShowPrintGuides(!showPrintGuides)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-colors ${
+                    showPrintGuides
+                      ? 'bg-slate-800 border-sky-500/50 text-sky-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Ruler className="w-3.5 h-3.5" />
+                  <span>Guias de Papel</span>
+                </button>
+
+                {/* Final Print Confirmation Button */}
+                <button
+                  type="button"
+                  onClick={handleConfirmFinalPrint}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-colors"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>
+                    Confirmar Impressão{' '}
+                    {format === 'A4' ? 'A4' : format === 'TERMICO_80MM' ? '80mm' : '58mm'}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* Paper Specification Status Strip */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 font-mono">
+              <span>
+                {format === 'A4'
+                  ? '📄 Simulação de Folha A4 Padrão ISO 216 (210mm × 297mm · Retrato · Margem Técnica 8mm)'
+                  : format === 'TERMICO_80MM'
+                  ? '🧾 Simulação de Rolo Térmico POS 80mm (Largura de impressão 72mm · Corte Automático)'
+                  : '📱 Simulação de Rolo Térmico Portátil 58mm (Largura de impressão 48mm · Bluetooth/Móvel)'}
+              </span>
+              <span className="text-amber-300 font-semibold">
+                Via a imprimir: {viaLabel} · Doc: {invoice.docNumber}
+              </span>
+            </div>
+          </div>
+        )}
+
         {shareFeedback && (
           <div className="no-print px-4 py-2 rounded-lg bg-emerald-950/90 border border-emerald-700 text-emerald-200 text-xs flex items-center justify-between">
             <span>{shareFeedback}</span>
@@ -237,17 +390,60 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
           </div>
         )}
 
-        {/* Document Preview Surface (Readjusted A4 & Thermal 80mm / 58mm) */}
-        <div className="flex justify-center overflow-x-auto py-1">
-          {isThermal ? (
-            /* TALÃO TÉRMICO REAJUSTADO (80MM COMPUTADOR POS / 58MM DISPOSITIVO MÓVEL) */
-            <div
-              className={`${
-                isMobile58
-                  ? 'w-[228px] sm:w-[242px] p-3 text-[10px]'
-                  : 'w-[304px] sm:w-[324px] p-4 text-[11px]'
-              } max-w-full bg-white text-slate-950 rounded-sm shadow-2xl border border-slate-300 font-mono leading-snug space-y-2.5 mx-auto invoice-print-container`}
-            >
+        {/* Document Preview Surface (Readjusted A4 & Thermal 80mm / 58mm with Print Preview Zoom & Guides) */}
+        <div className="flex justify-center overflow-x-auto py-2">
+          <div
+            style={
+              isPrintPreviewMode && previewZoom !== 100
+                ? {
+                    transform: `scale(${previewZoom / 100})`,
+                    transformOrigin: 'top center',
+                  }
+                : undefined
+            }
+            className="transition-transform duration-150 w-full flex flex-col items-center"
+          >
+            {/* Top Dimension Ruler Guide when Print Preview Guides are active */}
+            {isPrintPreviewMode && showPrintGuides && (
+              <div
+                className={`no-print mb-1.5 flex items-center justify-between px-2 py-0.5 rounded bg-slate-900/90 border border-dashed border-sky-500/50 text-[10px] font-mono text-sky-300 ${
+                  isThermal
+                    ? isMobile58
+                      ? 'w-[228px] sm:w-[242px]'
+                      : 'w-[304px] sm:w-[324px]'
+                    : 'w-full max-w-[210mm]'
+                }`}
+              >
+                <span>|←</span>
+                <span className="flex items-center gap-1 font-bold">
+                  {isThermal ? (
+                    <>
+                      <Scissors className="w-3 h-3 text-amber-400" />
+                      <span>
+                        {isMobile58 ? 'LARGURA ROLO 58 mm' : 'LARGURA ROLO TÉRMICO 80 mm'}
+                      </span>
+                    </>
+                  ) : (
+                    <span>LARGURA PÁGINA A4: 210 mm (ALTURA: 297 mm)</span>
+                  )}
+                </span>
+                <span>→|</span>
+              </div>
+            )}
+
+            {isThermal ? (
+              /* TALÃO TÉRMICO REAJUSTADO (80MM COMPUTADOR POS / 58MM DISPOSITIVO MÓVEL) */
+              <div
+                className={`${
+                  isMobile58
+                    ? 'w-[228px] sm:w-[242px] p-3 text-[10px]'
+                    : 'w-[304px] sm:w-[324px] p-4 text-[11px]'
+                } max-w-full bg-white text-slate-950 rounded-sm shadow-2xl border ${
+                  isPrintPreviewMode && showPrintGuides
+                    ? 'border-2 border-dashed border-sky-500/70'
+                    : 'border-slate-300'
+                } font-mono leading-snug space-y-2.5 mx-auto invoice-print-container`}
+              >
               {/* Company Header */}
               <div className="text-center border-b border-dashed border-slate-400 pb-2.5 space-y-1">
                 {company.logoUrl && (
@@ -398,7 +594,13 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
             </div>
           ) : (
             /* FACTURA A4 OFICIAL REAJUSTADA (210MM X 297MM PROPORÇÃO PADRÃO A4) */
-            <div className="w-full max-w-[210mm] min-h-[297mm] bg-white text-slate-900 rounded-sm shadow-2xl border border-slate-300 p-6 sm:p-10 flex flex-col justify-between text-[11px] leading-relaxed mx-auto invoice-print-container">
+            <div
+              className={`w-full max-w-[210mm] min-h-[297mm] bg-white text-slate-900 rounded-sm shadow-2xl border ${
+                isPrintPreviewMode && showPrintGuides
+                  ? 'border-2 border-dashed border-sky-500/70'
+                  : 'border-slate-300'
+              } p-6 sm:p-10 flex flex-col justify-between text-[11px] leading-relaxed mx-auto invoice-print-container`}
+            >
               {/* Top & Middle Content Wrapper */}
               <div className="space-y-6">
                 {/* 1. Top Header: Client Company Identity & Document Badge */}
@@ -721,6 +923,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>

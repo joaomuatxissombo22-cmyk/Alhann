@@ -150,19 +150,24 @@ export default function App() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [globalNotice, setGlobalNotice] = useState<{ title: string; message: string } | null>(null);
 
-  // Hidden Master Admin Portal State (/painel-adm-alhan, /admin, /adm, /?adm=alhan, #painel-adm-alhan)
+  // Hidden Master Admin Portal State (/painel-adm-alhan, /?painel=adm-alhan, /?adm=alhan, #painel-adm-alhan)
   const checkIsAdminLocation = () => {
     if (typeof window === 'undefined') return false;
     const p = window.location.pathname.toLowerCase();
     const s = new URLSearchParams(window.location.search);
     const h = window.location.hash.toLowerCase();
     return (
-      p.startsWith('/painel-adm-alhan') ||
+      p.includes('/painel-adm-alhan') ||
+      p.includes('/painel-adm') ||
       p === '/admin' ||
+      p.startsWith('/admin/') ||
       p === '/adm' ||
+      p.startsWith('/adm/') ||
+      s.get('painel') === 'adm-alhan' ||
+      s.get('painel') === 'adm' ||
       s.get('adm') === 'alhan' ||
       s.get('admin') === '1' ||
-      h.includes('painel-adm-alhan') ||
+      h.includes('painel-adm') ||
       h === '#adm' ||
       h === '#admin'
     );
@@ -1441,7 +1446,6 @@ export default function App() {
             setIsAuthModalOpen(false);
             setIsRegisterModalOpen(true);
           }}
-          onOpenAdminGate={openHiddenAdminGate}
           isSigningIn={isSigningIn}
         />
         <AuthModal
@@ -1455,7 +1459,6 @@ export default function App() {
             setIsRegisterModalOpen(true);
           }}
           onTryGoogleSignIn={() => handleSignInGoogle()}
-          onOpenAdminGate={openHiddenAdminGate}
           onMasterAdminDirectLogin={() => {
             try {
               sessionStorage.setItem('alhan_master_admin_session_v1', 'authenticated');

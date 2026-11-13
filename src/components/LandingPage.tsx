@@ -25,9 +25,8 @@ import {
   MCX_EXPRESS_OFFICIAL_NUMBER,
 } from '../lib/angolaUtils';
 import { PWAInstallButton } from './PWAInstallBanner';
-import heroAlhanLuandaImg from '../assets/images/hero_alhan_luanda_1794225056853.jpg';
-import featureAgtComplianceImg from '../assets/images/feature_agt_compliance_1794225057095.jpg';
-import avatarAngolaDirectorImg from '../assets/images/avatar_angola_director_1794225058343.jpg';
+import escritorioAlhanImg from '../assets/images/Escrit_rio_moderno_da_ALHAN_FACTURA_ab5ac85c.png';
+import reuniaoAlhanImg from '../assets/images/Reuni_o_Corporativa_ALHAN__Inova__o_em_Angola_3d80e89b.png';
 
 declare module 'react' {
   interface FormHTMLAttributes<T> extends HTMLAttributes<T> {
@@ -41,7 +40,6 @@ interface LandingPageProps {
   onSignInGoogle: (selectedPlan?: PlanIdType, selectedCycle?: BillingCycleType) => Promise<void>;
   onOpenLoginModal?: () => void;
   onOpenRegisterModal?: (selectedPlan?: PlanIdType, selectedCycle?: BillingCycleType) => void;
-  onOpenAdminGate?: () => void;
   isSigningIn: boolean;
 }
 
@@ -50,7 +48,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onSignInGoogle,
   onOpenLoginModal,
   onOpenRegisterModal,
-  onOpenAdminGate,
   isSigningIn,
 }) => {
   const [billingCycle, setBillingCycle] = useState<BillingCycleType>('mensal');
@@ -66,7 +63,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   });
   const [heroImgError, setHeroImgError] = useState(false);
   const [featureImgError, setFeatureImgError] = useState(false);
-  const [avatarImgError, setAvatarImgError] = useState(false);
 
   const cycleLabel: Record<BillingCycleType, string> = {
     mensal: '/ mês (Promo Black Friday -60%)',
@@ -239,30 +235,33 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </div>
             </div>
 
-            {/* Right Column: High-Impact Luanda Visual Asset */}
-            <div className="lg:col-span-5 flex">
-              <div className="relative w-full rounded-xl overflow-hidden border border-slate-800 bg-slate-900 flex flex-col justify-end min-h-[320px]">
+            {/* Right Column: High-Impact ALHAN FACTURA Modern Office Asset */}
+            <div className="lg:col-span-5 flex items-center">
+              <div className="w-full rounded-xl overflow-hidden border border-slate-800 bg-slate-900 shadow-2xl flex flex-col">
                 {!heroImgError ? (
                   <img
-                    src={heroAlhanLuandaImg || '/images/hero_alhan_luanda.jpg'}
-                    alt="Sede Corporativa e Gestão Empresarial em Luanda, Angola"
+                    src={
+                      escritorioAlhanImg ||
+                      '/assets/aistudio/Escrit_rio_moderno_da_ALHAN_FACTURA_ab5ac85c.png'
+                    }
+                    alt="Escritório Moderno da ALHAN FACTURA — Soluções de Facturação para Empresas Angolanas"
                     onError={() => setHeroImgError(true)}
-                    className="absolute inset-0 w-full h-full object-cover"
+                    className="w-full h-auto object-cover block"
                   />
                 ) : (
-                  <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-sky-950 to-slate-950 flex items-center justify-center p-8">
+                  <div className="h-64 bg-gradient-to-br from-slate-900 via-sky-950 to-slate-950 flex items-center justify-center p-8">
                     <Building2 className="w-20 h-20 text-sky-500/40" />
                   </div>
                 )}
-                <div className="relative z-10 p-6 bg-gradient-to-t from-slate-950 via-slate-950/85 to-transparent space-y-2">
-                  <p className="text-xs font-mono text-sky-400">
+                <div className="p-4 bg-slate-950 border-t border-slate-800 space-y-1.5">
+                  <p className="text-[11px] font-mono text-sky-400">
                     DECRETO PRESIDENCIAL N.º 71/25 · SAF-T (AO) 1.01_01
                   </p>
-                  <p className="text-sm font-semibold text-white">
+                  <p className="text-xs font-semibold text-white">
                     Controlo em Tempo Real para Empresas em todas as 21 Províncias de Angola
                   </p>
-                  <p className="text-xs text-slate-300">
-                    Assinatura Hash SHA-256 · Código QR Oficial · IVA 14%, 7%, 5% e Isento
+                  <p className="text-[11px] text-slate-400">
+                    Assinatura Hash SHA-256 · Código QR Oficial · IVA 14% e Retenção 6,5%
                   </p>
                 </div>
               </div>
@@ -403,7 +402,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <span aria-hidden="true">·</span>
                 <span>Auditoria Imutável de Operações</span>
                 <span aria-hidden="true">·</span>
-                <span>Painel Administrativo Central ALHAN</span>
+                <span>Controlo Multi-Estabelecimento e Filiais</span>
               </div>
             </div>
           </div>
@@ -442,39 +441,30 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             <div className="lg:col-span-5 space-y-6">
-              <div className="rounded-xl overflow-hidden border border-slate-700 bg-slate-800">
+              <div className="rounded-xl overflow-hidden border border-slate-700 bg-slate-800 shadow-xl">
                 {!featureImgError ? (
                   <img
-                    src={featureAgtComplianceImg || '/images/feature_agt_compliance.jpg'}
-                    alt="Controlo Financeiro e Conformidade Fiscal em Angola"
+                    src={
+                      reuniaoAlhanImg ||
+                      '/assets/aistudio/Reuni_o_Corporativa_ALHAN__Inova__o_em_Angola_3d80e89b.png'
+                    }
+                    alt="Reunião Corporativa ALHAN — Inovação, Tecnologia e Resultados em Angola"
                     onError={() => setFeatureImgError(true)}
-                    className="w-full h-56 object-cover"
+                    className="w-full h-auto object-cover block"
                   />
                 ) : (
                   <div className="w-full h-56 bg-slate-800 flex items-center justify-center">
                     <ShieldCheck className="w-12 h-12 text-sky-400" />
                   </div>
                 )}
-                <div className="p-5 space-y-4">
-                  <div className="flex items-center gap-3">
-                    {!avatarImgError ? (
-                      <img
-                        src={avatarAngolaDirectorImg || '/images/avatar_angola_director.jpg'}
-                        alt="Director Financeiro em Luanda"
-                        onError={() => setAvatarImgError(true)}
-                        className="w-11 h-11 rounded-full object-cover border border-slate-600 shrink-0"
-                      />
-                    ) : (
-                      <div className="w-11 h-11 rounded-full bg-sky-700 text-white flex items-center justify-center font-bold text-sm shrink-0">
-                        JM
-                      </div>
-                    )}
-                    <div>
-                      <p className="text-xs font-semibold text-white">Dr. Mateus Kassoma</p>
-                      <p className="text-[11px] text-slate-400">
-                        Director Financeiro · Grupo Logístico Kwanza Sul, Lda.
-                      </p>
-                    </div>
+                <div className="p-5 space-y-3 bg-slate-950/90 border-t border-slate-800">
+                  <div>
+                    <p className="text-xs font-semibold text-sky-400">
+                      ALHAN — Inovação · Tecnologia · Resultados
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      Juntos, construímos um futuro digital para as empresas em Angola
+                    </p>
                   </div>
                   <p className="text-xs text-slate-300 italic leading-relaxed">
                     "Antes do ALHAN FACTURA demorávamos 4 dias por mês a consolidar a facturação das nossas 3 filiais e a validar o ficheiro SAF-T AO. Hoje emitimos facturas em A4 e talão térmico em segundos, reduzimos as rupturas de stock em 68% e exportamos o SAF-T sem erros de estrutura."
@@ -938,16 +928,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <a href="/llms.txt" className="hover:text-white transition-colors font-mono">
               llms.txt
             </a>
-            {onOpenAdminGate && (
-              <button
-                type="button"
-                onClick={onOpenAdminGate}
-                className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-800 font-semibold transition-colors cursor-pointer"
-                title="Acesso restrito à Administração Central ALHAN"
-              >
-                Painel ADM
-              </button>
-            )}
           </div>
         </div>
       </footer>

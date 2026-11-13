@@ -1,5 +1,5 @@
 <IfModule mod_headers.c>
-  Header always set Link "</llms.txt>; rel=\"alternate\"; type=\"text/markdown\"; title=\"LLMs Documentation\", </.well-known/mcp/server-card.json>; rel=\"service-desc\"; type=\"application/json\"; title=\"MCP Server Card\", <https://plum-quetzal-938419.hostingersite.com/>; rel=\"canonical\""
+  Header always set Link "</llms.txt>; rel=\"alternate\"; type=\"text/markdown\"; title=\"LLMs Documentation\", </.well-known/mcp/server-card.json>; rel=\"service-desc\"; type=\"application/json\"; title=\"MCP Server Card\", <https://factura.alhan.pro/>; rel=\"canonical\""
   Header merge Vary Accept
 </IfModule>
 
@@ -26,5 +26,5 @@ ErrorDocument 404 /404.html
   RewriteRule ^ - [L]
 
   # Route known SPA paths to index.html; let unknown paths return a real HTTP 404
-  RewriteRule ^(about|sobre|contact|contactos|terms|termos|privacy|privacidade|pricing|planos|features|funcionalidades|faq|login|register|dashboard|painel-adm-alhan)/?$ /index.html [L]
+  RewriteRule ^(about|sobre|contact|contactos|terms|termos|privacy|privacidade|pricing|planos|features|funcionalidades|faq|login|register|dashboard|painel-adm-alhan|painel-adm|admin|adm)/?$ /index.html [L]
 </IfModule>
