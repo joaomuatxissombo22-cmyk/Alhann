@@ -41,8 +41,7 @@ interface LandingPageProps {
   onSignInGoogle: (selectedPlan?: PlanIdType, selectedCycle?: BillingCycleType) => Promise<void>;
   onOpenLoginModal?: () => void;
   onOpenRegisterModal?: (selectedPlan?: PlanIdType, selectedCycle?: BillingCycleType) => void;
-  onEnterDemoMode: () => void;
-  onOpenDocs: () => void;
+  onOpenAdminGate?: () => void;
   isSigningIn: boolean;
 }
 
@@ -51,8 +50,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onSignInGoogle,
   onOpenLoginModal,
   onOpenRegisterModal,
-  onEnterDemoMode,
-  onOpenDocs,
+  onOpenAdminGate,
   isSigningIn,
 }) => {
   const [billingCycle, setBillingCycle] = useState<BillingCycleType>('mensal');
@@ -228,14 +226,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     Iniciar Sessão
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={onEnterDemoMode}
-                    className="px-5 py-3 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-sm font-semibold text-slate-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                  >
-                    Demonstração Interactiva do Sistema
-                  </button>
-
                   <PWAInstallButton />
                 </div>
 
@@ -245,14 +235,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <span>Suporte Offline PWA</span>
                   <span aria-hidden="true">·</span>
                   <span>Fuso Horário Africa/Luanda</span>
-                  <span aria-hidden="true">·</span>
-                  <button
-                    type="button"
-                    onClick={onOpenDocs}
-                    className="text-sky-400 hover:text-sky-300 underline underline-offset-4 font-medium cursor-pointer"
-                  >
-                    Documentação Hostinger VPS & API
-                  </button>
                 </div>
               </div>
             </div>
@@ -956,13 +938,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <a href="/llms.txt" className="hover:text-white transition-colors font-mono">
               llms.txt
             </a>
-            <button
-              type="button"
-              onClick={onOpenDocs}
-              className="hover:text-white transition-colors cursor-pointer"
-            >
-              Implantação Hostinger & API
-            </button>
+            {onOpenAdminGate && (
+              <button
+                type="button"
+                onClick={onOpenAdminGate}
+                className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-800 font-semibold transition-colors cursor-pointer"
+                title="Acesso restrito à Administração Central ALHAN"
+              >
+                Painel ADM
+              </button>
+            )}
           </div>
         </div>
       </footer>

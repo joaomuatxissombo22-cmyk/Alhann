@@ -47,6 +47,8 @@ const KNOWN_APP_ROUTES = new Set([
   '/login',
   '/register',
   '/dashboard',
+  '/painel-adm-alhan',
+  '/painel-adm-alhan/',
 ]);
 
 const DEFAULT_LLMS_MARKDOWN = `# ALHAN FACTURA

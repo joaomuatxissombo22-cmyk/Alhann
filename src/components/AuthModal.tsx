@@ -1,10 +1,16 @@
 import React, { useState } from 'react';
-import { Building2, CheckCircle2, Lock, LogIn, Mail, ShieldCheck, UserPlus, X } from 'lucide-react';
+import { Building2, CheckCircle2, KeyRound, Lock, LogIn, Mail, ShieldCheck, UserPlus, X } from 'lucide-react';
 import {
   ALHAN_OFFICIAL_LOGO_URL,
   MCX_EXPRESS_BENEFICIARY,
   MCX_EXPRESS_OFFICIAL_NUMBER,
 } from '../lib/angolaUtils';
+import {
+  DEFAULT_MASTER_ADMIN_ALIAS,
+  DEFAULT_MASTER_ADMIN_PASS,
+  DEFAULT_MASTER_ADMIN_USER,
+  getStoredMasterAdminCreds,
+} from './AlhanAdminPanel';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -12,7 +18,8 @@ interface AuthModalProps {
   onLoginSuccess: (email: string, name: string, nif?: string) => void;
   onOpenRegisterCompany: (email?: string, name?: string) => void;
   onTryGoogleSignIn: () => Promise<void>;
-  onEnterDemoMode: () => void;
+  onOpenAdminGate?: () => void;
+  onMasterAdminDirectLogin?: () => void;
   isSigningInGoogle: boolean;
 }
 
@@ -22,13 +29,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onLoginSuccess,
   onOpenRegisterCompany,
   onTryGoogleSignIn,
-  onEnterDemoMode,
+  onOpenAdminGate,
+  onMasterAdminDirectLogin,
   isSigningInGoogle,
 }) => {
   const [tab, setTab] = useState<'login' | 'register'>('login');
-  const [emailOrNif, setEmailOrNif] = useState('geral@kwanzasolutions.ao');
-  const [password, setPassword] = useState('Alhan2026!');
-  const [companyResponsible, setCompanyResponsible] = useState('Eng. João Muatxissombo');
+  const [emailOrNif, setEmailOrNif] = useState('');
+  const [password, setPassword] = useState('');
+  const [companyResponsible, setCompanyResponsible] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -37,23 +45,42 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     e.preventDefault();
     setErrorMsg(null);
     const trimmed = emailOrNif.trim();
+    const passTrimmed = password.trim();
+
     if (!trimmed || trimmed.length < 4) {
       setErrorMsg('Por favor, indique o seu E-mail Corporativo ou NIF da empresa.');
       return;
     }
-    if (!password || password.length < 4) {
+    if (!passTrimmed || passTrimmed.length < 4) {
       setErrorMsg('Por favor, introduza a sua palavra-passe de acesso.');
       return;
     }
-    const resolvedEmail = trimmed.includes('@') ? trimmed : `${trimmed}@empresa.alhan.ao`;
-    onLoginSuccess(resolvedEmail, companyResponsible || 'Administrador Empresarial', trimmed);
+
+    // Check if the user is logging in with Master Admin credentials
+    const storedAdmin = getStoredMasterAdminCreds();
+    const userLower = trimmed.toLowerCase();
+    const isAdminUser =
+      userLower === storedAdmin.username.toLowerCase() ||
+      userLower === DEFAULT_MASTER_ADMIN_USER ||
+      userLower === DEFAULT_MASTER_ADMIN_ALIAS;
+    const isAdminPass =
+      passTrimmed === storedAdmin.password || passTrimmed === DEFAULT_MASTER_ADMIN_PASS;
+
+    if (isAdminUser && isAdminPass && onMasterAdminDirectLogin) {
+      onClose();
+      onMasterAdminDirectLogin();
+      return;
+    }
+
+    const resolvedEmail = trimmed.includes('@') ? trimmed : `${trimmed}@empresa.ao`;
+    onLoginSuccess(resolvedEmail, companyResponsible.trim() || 'Administrador Empresarial', trimmed);
   };
 
   const handleQuickRegisterRedirect = (e: React.FormEvent) => {
     e.preventDefault();
     onOpenRegisterCompany(
-      emailOrNif.includes('@') ? emailOrNif.trim() : 'geral@suaempresa.ao',
-      companyResponsible.trim() || 'Administrador da Empresa'
+      emailOrNif.includes('@') ? emailOrNif.trim() : '',
+      companyResponsible.trim()
     );
   };
 
@@ -73,7 +100,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 Acesso Empresarial ALHAN FACTURA
               </h2>
               <p className="text-[11px] text-slate-400">
-                Facturação Electrónica · AGT · Multicaixa Express ({MCX_EXPRESS_OFFICIAL_NUMBER})
+                Facturação Electrónica · Conformidade Fiscal Angola
               </p>
             </div>
           </div>
@@ -140,7 +167,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     required
                     value={emailOrNif}
                     onChange={(e) => setEmailOrNif(e.target.value)}
-                    placeholder="Ex.: geral@suaempresa.ao ou 5402891045"
+                    placeholder="Introduza o seu e-mail ou NIF da empresa"
                     className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2 text-slate-900 focus:border-sky-600 focus:outline-none"
                   />
                 </div>
@@ -157,7 +184,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
+                    placeholder="Introduza a sua palavra-passe"
                     className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2 text-slate-900 focus:border-sky-600 focus:outline-none"
                   />
                 </div>
@@ -168,24 +195,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 className="w-full py-3 px-4 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs transition-colors shadow-sm flex items-center justify-center gap-2"
               >
                 <LogIn className="w-4 h-4" />
-                <span>Entrar no Painel ALHAN FACTURA</span>
+                <span>Entrar no Sistema de Facturação</span>
               </button>
 
               <div className="pt-1 flex items-center justify-between text-[11px] text-slate-500">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmailOrNif('joaomuatxissombo22@gmail.com');
-                    setCompanyResponsible('Administração Central ALHAN');
-                  }}
-                  className="text-sky-700 hover:underline font-semibold"
-                >
-                  Acesso Admin Central ALHAN
-                </button>
+                <span>Ainda não possui conta?</span>
                 <button
                   type="button"
                   onClick={() => onOpenRegisterCompany()}
-                  className="text-slate-700 hover:underline font-semibold"
+                  className="text-sky-700 hover:underline font-semibold"
                 >
                   Registar Nova Empresa →
                 </button>
@@ -196,10 +214,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="p-3.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-950 space-y-1">
                 <p className="font-bold flex items-center gap-1.5">
                   <Building2 className="w-4 h-4 text-sky-700" />
-                  <span>Configuração Rápida de Nova Empresa (Angola)</span>
+                  <span>Registo de Nova Empresa (Angola)</span>
                 </p>
                 <p className="text-[11px] text-sky-800">
-                  Inclui desconto promocional de <strong>60% Black Friday</strong> em todos os planos e activação via Multicaixa Express (<strong>{MCX_EXPRESS_OFFICIAL_NUMBER} — {MCX_EXPRESS_BENEFICIARY}</strong>).
+                  Subscrição com activação via Multicaixa Express (<strong>{MCX_EXPRESS_OFFICIAL_NUMBER} — {MCX_EXPRESS_BENEFICIARY}</strong>). A sua conta empresarial é criada limpa, sem dados fictícios.
                 </p>
               </div>
 
@@ -212,7 +230,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   required
                   value={companyResponsible}
                   onChange={(e) => setCompanyResponsible(e.target.value)}
-                  placeholder="Ex.: Eng. João Muatxissombo"
+                  placeholder="Nome completo do responsável"
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-sky-600 focus:outline-none"
                 />
               </div>
@@ -226,7 +244,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   required
                   value={emailOrNif}
                   onChange={(e) => setEmailOrNif(e.target.value)}
-                  placeholder="geral@suaempresa.ao"
+                  placeholder="email@suaempresa.ao"
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-sky-600 focus:outline-none"
                 />
               </div>
@@ -244,33 +262,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <div className="relative flex py-1 items-center">
             <div className="flex-grow border-t border-slate-200"></div>
             <span className="flex-shrink mx-3 text-[11px] text-slate-400 font-medium">
-              OU ACESSO ALTERNATIVO
+              ACESSO ALTERNATIVO
             </span>
             <div className="flex-grow border-t border-slate-200"></div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div className="space-y-2">
             <button
               type="button"
               onClick={onTryGoogleSignIn}
               disabled={isSigningInGoogle}
-              className="py-2.5 px-3 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-800 font-semibold transition-colors flex items-center justify-center gap-2"
+              className="w-full py-2.5 px-3 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-800 font-semibold transition-colors flex items-center justify-center gap-2"
             >
               <ShieldCheck className="w-4 h-4 text-sky-600" />
-              <span>{isSigningInGoogle ? 'A ligar Google...' : 'Conta Google'}</span>
+              <span>{isSigningInGoogle ? 'A ligar Google...' : 'Autenticar com Conta Google'}</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onEnterDemoMode();
-              }}
-              className="py-2.5 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold transition-colors flex items-center justify-center gap-2"
-            >
-              <Building2 className="w-4 h-4 text-amber-400" />
-              <span>Modo Demonstração</span>
-            </button>
+            {onOpenAdminGate && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenAdminGate();
+                }}
+                className="w-full py-2 px-3 rounded-lg bg-slate-950 hover:bg-slate-900 text-amber-400 font-semibold transition-colors flex items-center justify-center gap-2 text-[11px]"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Entrar no Painel ADM (Administração Central ALHAN)</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

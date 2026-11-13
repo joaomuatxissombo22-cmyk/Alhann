@@ -26,5 +26,5 @@ ErrorDocument 404 /404.html
   RewriteRule ^ - [L]
 
   # Route known SPA paths to index.html; let unknown paths return a real HTTP 404
-  RewriteRule ^(about|sobre|contact|contactos|terms|termos|privacy|privacidade|pricing|planos|features|funcionalidades|faq|login|register|dashboard)/?$ /index.html [L]
+  RewriteRule ^(about|sobre|contact|contactos|terms|termos|privacy|privacidade|pricing|planos|features|funcionalidades|faq|login|register|dashboard|painel-adm-alhan)/?$ /index.html [L]
 </IfModule>

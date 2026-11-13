@@ -39,30 +39,29 @@ export const CompanyRegistrationModal: React.FC<CompanyRegistrationProps> = ({
   onSignOut,
 }) => {
   const [submitting, setSubmitting] = useState(false);
-  const [seedData, setSeedData] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
 
   const [form, setForm] = useState({
-    name: 'Kwanza Comércio Geral & Prestação de Serviços, Lda.',
-    commercialName: 'Kwanza Solutions Angola',
-    nif: '5402891045',
-    address: 'Avenida Comandante Valódia, Edifício Atrium, 4.º Andar, Ingombota',
+    name: '',
+    commercialName: '',
+    nif: '',
+    address: '',
     province: 'Luanda',
     municipality: 'Luanda',
-    phone: '+244 923 450 890',
-    email: userEmail || 'geral@kwanzasolutions.ao',
-    economicActivity: 'Comércio a Grosso, Consultoria Técnica e Prestação de Serviços Mercantis',
+    phone: '',
+    email: userEmail || '',
+    economicActivity: '',
     taxRegime: 'Regime Geral' as TaxRegimeType,
     vatScheme: 'IVA 14% (Geral)' as VatSchemeType,
-    responsibleName: userName || 'Eng. João Muatxissombo',
-    bankName: 'BAI — Banco Angolano de Investimentos',
-    bankIban: 'AO06.0040.0000.4829.1039.4820.1',
-    establishmentsCount: 2,
+    responsibleName: userName || '',
+    bankName: '',
+    bankIban: '',
+    establishmentsCount: 1,
     planId: defaultPlan,
     billingCycle: defaultCycle,
     agtAdhesionStatus: 'em_homologacao' as AgtAdhesionStatusType,
-    agtCertificateRef: 'CERT-AO-JWS-7125',
+    agtCertificateRef: '',
     logoUrl: '',
   });
 
@@ -122,7 +121,7 @@ export const CompanyRegistrationModal: React.FC<CompanyRegistrationProps> = ({
           subscriptionEndDate: endDateIso,
           agtAdhesionStatus: form.agtAdhesionStatus,
         },
-        seedData
+        false
       );
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Erro ao registar empresa.');
@@ -483,23 +482,13 @@ export const CompanyRegistrationModal: React.FC<CompanyRegistrationProps> = ({
             </div>
           </div>
 
-          <div className="p-4 rounded-lg bg-sky-50 border border-sky-200 flex items-start justify-between gap-4">
-            <label className="flex items-start gap-2.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={seedData}
-                onChange={(e) => setSeedData(e.target.checked)}
-                className="mt-0.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-              />
-              <div>
-                <span className="font-bold text-slate-900 block">
-                  Pré-carregar catálogo inicial de produtos, clientes, fornecedores e facturas de exemplo em Angola
-                </span>
-                <span className="text-slate-600 block mt-0.5">
-                  Recomendado para testar de imediato todos os módulos (Facturação, API AGT, SAF-T AO, Inventário, Tesouraria e Relatórios) com movimentos reais gravados na base de dados.
-                </span>
-              </div>
-            </label>
+          <div className="p-4 rounded-lg bg-sky-50 border border-sky-200 text-xs text-slate-700">
+            <span className="font-bold text-slate-900 block">
+              Ambiente Empresarial Limpo e Exclusivo
+            </span>
+            <span className="text-slate-600 block mt-0.5">
+              A sua conta empresarial será iniciada sem dados fictícios, pronta para registar os seus próprios clientes, artigos, séries e documentos fiscais reais.
+            </span>
           </div>
 
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2 border-t border-slate-200">

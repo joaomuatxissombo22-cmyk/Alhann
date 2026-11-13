@@ -23,10 +23,29 @@
 }
 
 @media print {
+  @page {
+    margin: 8mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
   .no-print {
     display: none !important;
   }
+
   .print-only {
     display: block !important;
+  }
+
+  .invoice-print-container {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
   }
 }

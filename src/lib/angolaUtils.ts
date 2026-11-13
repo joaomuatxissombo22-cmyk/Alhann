@@ -794,29 +794,36 @@ export function exportarFacturaPDF(invoice: Invoice, company: Company, format: '
   }
 
   if (format === 'TERMICO') {
-    const dynamicHeight = Math.max(210, 145 + parsedItems.length * 11);
+    const dynamicHeight = Math.max(175, 130 + parsedItems.length * 10);
     const doc = new jsPDF({ unit: 'mm', format: [80, dynamicHeight] });
-    let y = 8;
+    let y = 7;
 
     if (company.logoUrl && company.logoUrl.startsWith('data:image/')) {
       try {
-        doc.addImage(company.logoUrl, 'JPEG', 31, y, 18, 14);
-        y += 17;
+        doc.addImage(company.logoUrl, 'JPEG', 31, y, 18, 13);
+        y += 16;
       } catch {
         // fallback if image fails
       }
     }
 
-    doc.setFontSize(9.5);
-    doc.text(company.commercialName.slice(0, 30), 40, y, { align: 'center' });
+    doc.setFontSize(9);
+    doc.text((company.commercialName || company.name).slice(0, 32), 40, y, { align: 'center' });
     y += 4;
     doc.setFontSize(6.5);
     doc.text(company.name.slice(0, 38), 40, y, { align: 'center' });
     y += 3.5;
-    doc.text(`NIF: ${company.nif} | Tel: ${company.phone}`, 40, y, { align: 'center' });
+    doc.text(
+      `NIF: ${company.nif}${company.phone ? ` | Tel: ${company.phone}` : ''}`,
+      40,
+      y,
+      { align: 'center' }
+    );
     y += 3.5;
-    doc.text(`${company.address.slice(0, 36)} - ${company.province}`, 40, y, { align: 'center' });
-    y += 3.5;
+    if (company.address) {
+      doc.text(`${company.address.slice(0, 36)} - ${company.province}`, 40, y, { align: 'center' });
+      y += 3.5;
+    }
     doc.line(4, y, 76, y);
     y += 4.5;
 
@@ -826,12 +833,8 @@ export function exportarFacturaPDF(invoice: Invoice, company: Company, format: '
     doc.setFontSize(6.8);
     doc.text(`Exemplar: ${viaLabel} | Data: ${invoice.issueDate}`, 40, y, { align: 'center' });
     y += 4;
-    if (fiscal.blackFridayApplied) {
-      doc.text('*** PROMOCAO BLACK FRIDAY (-60%) APLICADA ***', 40, y, { align: 'center' });
-      y += 4;
-    }
 
-    doc.text(`Cliente: ${invoice.clientName.slice(0, 30)}`, 4, y);
+    doc.text(`Cliente: ${invoice.clientName.slice(0, 32)}`, 4, y);
     y += 3.5;
     doc.text(`NIF Cliente: ${invoice.clientNif || '999999999 (Consumidor Final)'}`, 4, y);
     y += 3.5;
@@ -856,60 +859,60 @@ export function exportarFacturaPDF(invoice: Invoice, company: Company, format: '
         4,
         y
       );
-      y += 4.5;
+      y += 4.2;
     });
 
     doc.line(4, y, 76, y);
-    y += 4.5;
+    y += 4.2;
 
     doc.setFontSize(6.8);
     if (fiscal.discountTotal > 0) {
       doc.text(`Valor Bruto s/ Desc.: ${formatKz(fiscal.grossBeforeDiscount)}`, 76, y, { align: 'right' });
-      y += 3.8;
-      doc.text(
-        `${fiscal.blackFridayApplied ? 'Desconto Black Friday (60%)' : 'Desconto Comercial'}: -${formatKz(fiscal.discountTotal)}`,
-        76,
-        y,
-        { align: 'right' }
-      );
-      y += 3.8;
+      y += 3.6;
+      doc.text(`Desconto Comercial: -${formatKz(fiscal.discountTotal)}`, 76, y, { align: 'right' });
+      y += 3.6;
     }
     doc.text(`Incidencia / Subtotal Liquido: ${formatKz(fiscal.subtotal)}`, 76, y, { align: 'right' });
-    y += 3.8;
+    y += 3.6;
     doc.text(`IVA (${fiscal.ivaRate}% - Taxa Normal Angola): +${formatKz(fiscal.taxTotal)}`, 76, y, { align: 'right' });
-    y += 3.8;
+    y += 3.6;
     doc.text(`Retencao na Fonte (${fiscal.withholdingRate}% - I.I.): -${formatKz(fiscal.withholdingAmount)}`, 76, y, { align: 'right' });
-    y += 4.5;
+    y += 4.2;
 
-    doc.setFontSize(8.5);
+    doc.setFontSize(8.2);
     doc.text(`TOTAL FACTURA: ${formatKz(fiscal.totalAmount)}`, 76, y, { align: 'right' });
-    y += 4.5;
-    doc.setFontSize(8.8);
+    y += 4.2;
+    doc.setFontSize(8.6);
     doc.text(`LIQUIDO A PAGAR: ${formatKz(fiscal.netPayableAmount)}`, 76, y, { align: 'right' });
-    y += 4.5;
+    y += 4.2;
 
     doc.line(4, y, 76, y);
-    y += 4;
+    y += 3.8;
     doc.setFontSize(6);
-    doc.text(`Meio: ${invoice.paymentMethod} | MCX: ${MCX_EXPRESS_OFFICIAL_NUMBER}`, 40, y, { align: 'center' });
-    y += 3.5;
-    const hash4 = `${invoice.hashCode[0] || 'A'}${invoice.hashCode[10] || 'L'}${invoice.hashCode[20] || 'H'}${invoice.hashCode[30] || 'N'}`;
     doc.text(
-      `${hash4} - AGT: ${(AGT_STATE_LABELS[invoice.agtTransmissionStatus]?.label || invoice.agtTransmissionStatus).slice(0, 28)}`,
+      `Meio: ${invoice.paymentMethod}${company.bankIban ? ` | IBAN: ${company.bankIban.slice(0, 22)}` : ''}`,
       40,
       y,
       { align: 'center' }
     );
     y += 3.5;
-    doc.text('Processado por ALHAN FACTURA (DP 71/25 - Angola)', 40, y, { align: 'center' });
+    const hash4 = `${invoice.hashCode[0] || 'A'}${invoice.hashCode[10] || 'L'}${invoice.hashCode[20] || 'H'}${invoice.hashCode[30] || 'N'}`;
+    doc.text(
+      `${hash4} - Hash SHA-256: ${invoice.hashCode.slice(0, 14)} (D.P. n.º 71/25)`,
+      40,
+      y,
+      { align: 'center' }
+    );
+    y += 3.5;
+    doc.text(`${company.name.slice(0, 36)} | NIF: ${company.nif}`, 40, y, { align: 'center' });
 
     doc.save(`${invoice.docNumber.replace(/\//g, '_')}_TERMICO.pdf`);
     return;
   }
 
-  const doc = new jsPDF();
-  // Header brand bar
-  doc.setFillColor(11, 25, 44);
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  // Header brand bar (Client Company)
+  doc.setFillColor(15, 23, 42);
   doc.rect(0, 0, 210, 34, 'F');
 
   let textStartX = 14;
@@ -923,37 +926,36 @@ export function exportarFacturaPDF(invoice: Invoice, company: Company, format: '
   }
 
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(15);
-  doc.text(company.name.slice(0, 48), textStartX, 15);
-  doc.setFontSize(9);
-  doc.text(`NIF: ${company.nif}  |  ${company.taxRegime}  |  IVA 14% & Retenção 6,5%`, textStartX, 22);
-  doc.text(`${company.address}, ${company.municipality} - ${company.province} | Tel: ${company.phone}`, textStartX, 28);
-
-  doc.setFontSize(11);
-  doc.text(viaLabel, 196, 15, { align: 'right' });
-  doc.setFontSize(8);
+  doc.setFontSize(14);
+  doc.text(company.name.slice(0, 50), textStartX, 14);
+  doc.setFontSize(8.5);
+  doc.text(`NIF: ${company.nif}  |  ${company.taxRegime} (${company.vatScheme})`, textStartX, 21);
   doc.text(
-    `ESTADO AGT: ${(AGT_STATE_LABELS[invoice.agtTransmissionStatus]?.label || invoice.agtTransmissionStatus).toUpperCase()}`,
-    196,
-    22,
-    { align: 'right' }
+    `${company.address ? `${company.address}, ` : ''}${company.municipality} - ${company.province}${company.phone ? ` | Tel: ${company.phone}` : ''}`,
+    textStartX,
+    27
   );
 
+  doc.setFontSize(10.5);
+  doc.text(viaLabel, 196, 14, { align: 'right' });
+  doc.setFontSize(8);
+  doc.text(`Série: ${invoice.series} | Moeda: AOA (Kz)`, 196, 21, { align: 'right' });
+
   doc.setTextColor(15, 23, 42);
-  doc.setFontSize(13);
-  doc.text(`${invoice.docType.toUpperCase()} — ${invoice.docNumber}`, 14, 46);
+  doc.setFontSize(12.5);
+  doc.text(`${invoice.docType.toUpperCase()} — ${invoice.docNumber}`, 14, 45);
 
-  doc.setFontSize(9);
-  doc.text(`Data de Emissão: ${invoice.issueDate}`, 14, 53);
-  doc.text(`Data de Vencimento: ${invoice.dueDate}`, 14, 58);
-  doc.text(`Condições de Pagamento: ${invoice.paymentTerms} (${invoice.paymentMethod})`, 14, 63);
+  doc.setFontSize(8.5);
+  doc.text(`Data de Emissão: ${invoice.issueDate}`, 14, 52);
+  doc.text(`Data de Vencimento: ${invoice.dueDate}`, 14, 57);
+  doc.text(`Condições de Pagamento: ${invoice.paymentTerms} (${invoice.paymentMethod})`, 14, 62);
 
-  doc.setFontSize(10);
-  doc.text('Exmo.(s) Sr.(s) / Cliente:', 120, 46);
+  doc.setFontSize(9.5);
+  doc.text('Exmo.(s) Sr.(s) / Entidade Destinatária:', 118, 45);
   doc.setFontSize(9);
-  doc.text(invoice.clientName, 120, 52);
-  doc.text(`NIF: ${invoice.clientNif || '999999999 (Consumidor Final)'}`, 120, 57);
-  doc.text(`Morada: ${invoice.clientAddress || 'Luanda, Angola'}`, 120, 62);
+  doc.text(invoice.clientName, 118, 51);
+  doc.text(`NIF: ${invoice.clientNif || '999999999 (Consumidor Final)'}`, 118, 56);
+  doc.text(`Endereço: ${invoice.clientAddress || 'Luanda, Angola'}`, 118, 61);
 
   const tableRows = parsedItems.map((item, i) => [
     String(i + 1),
@@ -967,49 +969,49 @@ export function exportarFacturaPDF(invoice: Invoice, company: Company, format: '
   ]);
 
   autoTable(doc, {
-    startY: 70,
-    head: [['#', 'Código', 'Descrição', 'Qtd', 'Preço Unit.', 'Desc.', 'IVA (14%)', 'Total']],
+    startY: 68,
+    head: [['#', 'Código', 'Descrição do Artigo / Serviço', 'Qtd', 'Preço Unit.', 'Desc.', 'IVA', 'Total (AOA)']],
     body: tableRows,
-    headStyles: { fillColor: [11, 25, 44], textColor: 255, fontSize: 8 },
+    headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8 },
     bodyStyles: { fontSize: 8 },
+    margin: { left: 14, right: 14 },
   });
 
   const finalY = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || 130;
 
-  doc.setFontSize(9);
+  doc.setFontSize(8.8);
   doc.text(`Subtotal / Incidência Tributável: ${formatKz(fiscal.subtotal)}`, 196, finalY + 10, { align: 'right' });
-  doc.text(
-    `${fiscal.blackFridayApplied ? 'Desconto Promoção Black Friday (60%)' : 'Total de Descontos Comerciais'}: -${formatKz(fiscal.discountTotal)}`,
-    196,
-    finalY + 16,
-    { align: 'right' }
-  );
-  doc.text(`Imposto sobre o Valor Acrescentado — IVA (${fiscal.ivaRate}%): +${formatKz(fiscal.taxTotal)}`, 196, finalY + 22, { align: 'right' });
-  doc.text(`Retenção na Fonte (${fiscal.withholdingRate}% — Imposto Industrial): -${formatKz(fiscal.withholdingAmount)}`, 196, finalY + 28, { align: 'right' });
-  doc.setFontSize(11);
-  doc.text(`TOTAL DA FACTURA (c/ IVA 14%): ${formatKz(fiscal.totalAmount)}`, 196, finalY + 35, { align: 'right' });
-  doc.setFontSize(12);
-  doc.text(`VALOR LÍQUIDO A PAGAR (após Retenção 6,5%): ${formatKz(fiscal.netPayableAmount)}`, 196, finalY + 42, { align: 'right' });
+  doc.text(`Total de Descontos Comerciais: -${formatKz(fiscal.discountTotal)}`, 196, finalY + 15.5, { align: 'right' });
+  doc.text(`Imposto sobre o Valor Acrescentado — IVA (${fiscal.ivaRate}%): +${formatKz(fiscal.taxTotal)}`, 196, finalY + 21, { align: 'right' });
+  doc.text(`Retenção na Fonte (${fiscal.withholdingRate}% — Imposto Industrial): -${formatKz(fiscal.withholdingAmount)}`, 196, finalY + 26.5, { align: 'right' });
+  doc.setFontSize(10.5);
+  doc.text(`TOTAL DA FACTURA (c/ IVA ${fiscal.ivaRate}%): ${formatKz(fiscal.totalAmount)}`, 196, finalY + 33, { align: 'right' });
+  doc.setFontSize(11.5);
+  doc.text(`VALOR LÍQUIDO A PAGAR (após Retenção ${fiscal.withholdingRate}%): ${formatKz(fiscal.netPayableAmount)}`, 196, finalY + 40, { align: 'right' });
 
   doc.setFontSize(8);
-  doc.text(`Valor por extenso: ${valorPorExtensoKz(fiscal.netPayableAmount)}`, 14, finalY + 50);
-  if (company.bankIban) {
-    doc.text(`Coordenadas Bancárias (${company.bankName}): IBAN ${company.bankIban} | Multicaixa Express: ${MCX_EXPRESS_OFFICIAL_NUMBER}`, 14, finalY + 56);
+  doc.text(`Valor por extenso: ${valorPorExtensoKz(fiscal.netPayableAmount)}`, 14, finalY + 48);
+  if (company.bankIban || company.bankName) {
+    doc.text(
+      `Coordenadas Bancárias (${company.bankName || company.name}): ${company.bankIban || ''}${company.phone ? ` | Contacto: ${company.phone}` : ''}`,
+      14,
+      finalY + 54
+    );
   }
   if (invoice.notes) {
-    doc.text(`Observações: ${invoice.notes}`, 14, finalY + 62);
+    doc.text(`Observações: ${invoice.notes}`, 14, finalY + 60);
   }
 
   const hash4 = `${invoice.hashCode[0] || 'A'}${invoice.hashCode[10] || 'L'}${invoice.hashCode[20] || 'H'}${invoice.hashCode[30] || 'N'}`;
   doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
   doc.text(
-    `${hash4} - Estado Fiscal AGT: ${AGT_STATE_LABELS[invoice.agtTransmissionStatus]?.label || invoice.agtTransmissionStatus} (Decreto Presidencial n.º 71/25) | Hash: ${invoice.hashCode.slice(0, 24)}...`,
+    `${hash4} — Assinatura Digital SHA-256: ${invoice.hashCode.slice(0, 28)}... | Decreto Presidencial n.º 71/25 · SAF-T (AO)`,
     14,
     282
   );
   doc.text(
-    'ALHAN FACTURA — Pertencente a ALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA | Tel: 922 021 211 | facturao@alhan.pro',
+    `Emitido por: ${company.name} | NIF: ${company.nif}${company.phone ? ` | Tel: ${company.phone}` : ''}${company.email ? ` | ${company.email}` : ''}`,
     14,
     287
   );
@@ -1069,13 +1071,13 @@ export function exportarRelatorioPDF(params: {
   summaryText: string;
 }): void {
   const doc = new jsPDF();
-  doc.setFillColor(11, 25, 44);
+  doc.setFillColor(15, 23, 42);
   doc.rect(0, 0, 210, 28, 'F');
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(14);
-  doc.text(`ALHAN FACTURA — ${params.title}`, 14, 13);
+  doc.setFontSize(13);
+  doc.text(`${params.company.name} — ${params.title}`, 14, 13);
   doc.setFontSize(9);
-  doc.text(`${params.company.name} (NIF: ${params.company.nif}) | Período: ${params.period}`, 14, 21);
+  doc.text(`NIF: ${params.company.nif} | Período: ${params.period}`, 14, 21);
 
   doc.setTextColor(15, 23, 42);
   doc.setFontSize(10);
@@ -1085,7 +1087,7 @@ export function exportarRelatorioPDF(params: {
     startY: 44,
     head: [params.headers],
     body: params.rows,
-    headStyles: { fillColor: [11, 25, 44], textColor: 255, fontSize: 8 },
+    headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8 },
     bodyStyles: { fontSize: 8 },
   });
 
@@ -1116,5 +1118,5 @@ export function exportarFluxoCaixaExcel(transactions: FinancialTransaction[]): v
     Estado: t.status,
     Valor_Kz: t.amount,
   }));
-  exportarDadosExcel('FluxoCaixa', 'ALHAN_Fluxo_de_Caixa', rows);
+  exportarDadosExcel('FluxoCaixa', 'Fluxo_de_Caixa_Empresarial', rows);
 }

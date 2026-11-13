@@ -75,8 +75,6 @@ import {
   UserRoleType,
 } from './types/models';
 import {
-  ALHAN_OFFICIAL_LOGO_URL,
-  BLACK_FRIDAY_DISCOUNT_PERCENT,
   calcularDataVencimentoSubscricao,
   calcularDiasParaVencimento,
   calcularResumoFiscalFactura,
@@ -96,8 +94,7 @@ import { LandingPage } from './components/LandingPage';
 import { AuthModal } from './components/AuthModal';
 import { CompanyRegistrationModal } from './components/CompanyRegistrationModal';
 import { InvoiceModal } from './components/InvoiceModal';
-import { DocumentationModal } from './components/DocumentationModal';
-import { AlhanAdminPanel } from './components/AlhanAdminPanel';
+import { AlhanAdminPanel, saveClientAccessPassword } from './components/AlhanAdminPanel';
 import { FiscalComplianceModule } from './components/FiscalComplianceModule';
 import { OperationsModules } from './components/OperationsModules';
 import { MulticaixaCheckoutModal } from './components/MulticaixaCheckoutModal';
@@ -149,10 +146,38 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('dashboard');
   const [activeRoleView, setActiveRoleView] = useState<UserRoleType>('Administrador');
-  const [isDocsOpen, setIsDocsOpen] = useState(false);
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [globalNotice, setGlobalNotice] = useState<{ title: string; message: string } | null>(null);
+
+  // Hidden Master Admin Portal State (/painel-adm-alhan, /admin, /adm, /?adm=alhan, #painel-adm-alhan)
+  const checkIsAdminLocation = () => {
+    if (typeof window === 'undefined') return false;
+    const p = window.location.pathname.toLowerCase();
+    const s = new URLSearchParams(window.location.search);
+    const h = window.location.hash.toLowerCase();
+    return (
+      p.startsWith('/painel-adm-alhan') ||
+      p === '/admin' ||
+      p === '/adm' ||
+      s.get('adm') === 'alhan' ||
+      s.get('admin') === '1' ||
+      h.includes('painel-adm-alhan') ||
+      h === '#adm' ||
+      h === '#admin'
+    );
+  };
+
+  const [isHiddenAdminRoute, setIsHiddenAdminRoute] = useState<boolean>(checkIsAdminLocation);
+  const [isMasterAdminAuthenticated, setIsMasterAdminAuthenticated] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return sessionStorage.getItem('alhan_master_admin_session_v1') === 'authenticated';
+    } catch {
+      return false;
+    }
+  });
+  const [isInspectingClientFromAdmin, setIsInspectingClientFromAdmin] = useState(false);
 
   const isOnline = useOnlineStatus();
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
@@ -187,10 +212,17 @@ export default function App() {
     'Bens e serviços colocados à disposição do adquirente na data de emissão.'
   );
   const [lineItems, setLineItems] = useState<
-    { productId: string; quantity: number; discountPercent: number }[]
-  >([]);
+    {
+      productId: string;
+      customDescription?: string;
+      customUnitPrice?: number;
+      quantity: number;
+      discountPercent: number;
+    }[]
+  >([{ productId: '', customDescription: '', customUnitPrice: 0, quantity: 1, discountPercent: 0 }]);
+  const [customClientName, setCustomClientName] = useState('');
+  const [customClientNif, setCustomClientNif] = useState('');
   const [applyWithholding65, setApplyWithholding65] = useState(true);
-  const [applyBlackFriday60, setApplyBlackFriday60] = useState(false);
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>('todos');
   const [partialPaymentAmount, setPartialPaymentAmount] = useState<Record<string, number>>({});
@@ -213,8 +245,45 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  const isCentralAlhanAdmin =
-    currentUser?.email === 'joaomuatxissombo22@gmail.com' || isDemoMode;
+  // Listen to popstate/hashchange for the hidden Admin URL & purge old fictitious storage keys
+  useEffect(() => {
+    try {
+      localStorage.removeItem('alhan_all_clients_companies_v1');
+      localStorage.removeItem('alhan_registered_company_v1');
+      const savedCleanRaw = localStorage.getItem('alhan_clean_companies_v3');
+      if (savedCleanRaw) {
+        const parsed = JSON.parse(savedCleanRaw) as Company[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setCompanies(parsed);
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    const syncAdminRoute = () => {
+      setIsHiddenAdminRoute(checkIsAdminLocation());
+    };
+    window.addEventListener('popstate', syncAdminRoute);
+    window.addEventListener('hashchange', syncAdminRoute);
+    return () => {
+      window.removeEventListener('popstate', syncAdminRoute);
+      window.removeEventListener('hashchange', syncAdminRoute);
+    };
+  }, []);
+
+  const persistCompaniesList = (list: Company[]) => {
+    try {
+      localStorage.setItem('alhan_clean_companies_v3', JSON.stringify(list));
+      if (list[0]) {
+        localStorage.setItem('alhan_clean_active_company_v3', JSON.stringify(list[0]));
+      } else {
+        localStorage.removeItem('alhan_clean_active_company_v3');
+      }
+    } catch {
+      // ignore storage errors
+    }
+  };
 
   // Real-Time Firestore Listeners when Authenticated
   useEffect(() => {
@@ -395,575 +464,79 @@ export default function App() {
     }
   };
 
+  const resetClientWorkspaceData = () => {
+    setClients([]);
+    setProducts([]);
+    setInvoices([]);
+    setMovements([]);
+    setTransactions([]);
+    setSuppliers([]);
+    setTickets([]);
+    setAuditLogs([]);
+    setAgtLogs([]);
+  };
+
   const handleDirectLoginSuccess = async (email: string, name: string, nifInput?: string) => {
     setIsAuthModalOpen(false);
-    await handleEnterDemoMode();
+    resetClientWorkspaceData();
+
     try {
-      const savedRaw = localStorage.getItem('alhan_registered_company_v1');
-      if (savedRaw) {
-        const savedComp = JSON.parse(savedRaw) as Company;
-        if (savedComp && savedComp.name) {
-          setCompanies([savedComp]);
-          return;
+      const allRaw = localStorage.getItem('alhan_clean_companies_v3');
+      if (allRaw) {
+        const allList = JSON.parse(allRaw) as Company[];
+        if (Array.isArray(allList) && allList.length > 0) {
+          const matched = allList.find(
+            (c) =>
+              c.email.toLowerCase() === email.toLowerCase() ||
+              (nifInput && c.nif.toLowerCase() === nifInput.toLowerCase())
+          );
+          if (matched) {
+            const reordered = [matched, ...allList.filter((c) => c.id !== matched.id)];
+            setCompanies(reordered);
+            setTeamMembers([
+              {
+                id: sanitizeId('tm'),
+                ownerId: matched.ownerId,
+                companyId: matched.id,
+                name: matched.responsibleName || name,
+                email: matched.email,
+                role: 'Administrador',
+                establishment: 'Sede Principal',
+                permissionsSummary:
+                  'Acesso Total: Facturação, SAF-T, AGT, Financeiro, Stock, Utilizadores e Configurações',
+                status: 'activo',
+              },
+            ]);
+            setIsDemoMode(true);
+            setActiveTab('dashboard');
+            return;
+          }
         }
       }
     } catch {
       // ignore localStorage parse error
     }
-    setCompanies((prev) =>
-      prev.map((c, idx) =>
-        idx === 0
-          ? {
-              ...c,
-              email: email || c.email,
-              responsibleName: name || c.responsibleName,
-              nif: nifInput && !nifInput.includes('@') ? nifInput : c.nif,
-            }
-          : c
-      )
-    );
+
+    // If no company exists yet for this login, open the clean Company Registration form (no fake company created)
+    setPendingUserEmail(email.includes('@') ? email : '');
+    setPendingUserName(name !== 'Administrador Empresarial' ? name : '');
+    setIsRegisterModalOpen(true);
   };
 
-  // Interactive Demo Mode Seeder (for instant exploration from Landing Page)
+  // Clean Mode Handler (No Fictitious Data)
   const handleEnterDemoMode = async () => {
-    const demoOwner = 'demo_owner_ao';
-    const demoCompId = 'comp_alhan_demo_01';
-    const today = getLuandaIsoDate();
-
-    const demoCompany: Company = {
-      id: demoCompId,
-      ownerId: demoOwner,
-      name: 'Kwanza Solutions & Logística Empresarial, Lda.',
-      commercialName: 'Kwanza Solutions Angola',
-      nif: '5402891045',
-      address: 'Av. Comandante Valódia, Edifício Atrium, 4.º Andar, Ingombota',
-      province: 'Luanda',
-      municipality: 'Luanda',
-      phone: '+244 922 021 211',
-      email: 'facturao@alhan.pro',
-      economicActivity: 'Consultoria Informática, Comércio de Equipamentos e Logística',
-      taxRegime: 'Regime Geral',
-      vatScheme: 'IVA 14% (Geral)',
-      responsibleName: 'Eng. João Muatxissombo',
-      bankName: 'BAI — Banco Angolano de Investimentos',
-      bankIban: 'AO06.0040.0000.4829.1039.4820.1',
-      establishmentsCount: 3,
-      planId: 'empresarial',
-      billingCycle: 'anual',
-      subscriptionStatus: 'activa',
-      agtStatus: 'preparacao_certificacao',
-      agtCertificateRef: 'CERT-AO-JWS-7125',
-      agtEnvironment: 'sandbox_teste',
-      subscriptionStartDate: today,
-      subscriptionEndDate: calcularDataVencimentoSubscricao(today, 'mensal'),
-      agtAdhesionStatus: 'em_homologacao',
-    };
-
-    const demoClients: Client[] = [
-      {
-        id: 'cli_01',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        clientType: 'empresarial',
-        name: 'Sonangol Distribuidora & Logística, S.A.',
-        nif: '5401002938',
-        address: 'Rua Rainha Ginga, N.º 84, Luanda',
-        province: 'Luanda',
-        phone: '+244 923 110 220',
-        email: 'contabilidade@sonangoldist.ao',
-        contactPerson: 'Dr. Carlos Mendes',
-        creditLimit: 15000000,
-        currentBalance: 456000,
-        totalInvoiced: 2736000,
-        totalPaid: 2280000,
-      },
-      {
-        id: 'cli_02',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        clientType: 'empresarial',
-        name: 'Rede Supermercados Kero Angola, Lda.',
-        nif: '5403991827',
-        address: 'Talatona, Luanda Sul',
-        province: 'Luanda',
-        phone: '+244 924 880 110',
-        email: 'compras@kero.ao',
-        contactPerson: 'Dra. Helena Silva',
-        creditLimit: 8500000,
-        currentBalance: 0,
-        totalInvoiced: 1140000,
-        totalPaid: 1140000,
-      },
-      {
-        id: 'cli_03',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        clientType: 'particular',
-        name: 'Eng. Domingos Sebastião',
-        nif: '004829103LA042',
-        address: 'Centralidade do Kilamba, Bloco Q',
-        province: 'Luanda',
-        phone: '+244 931 400 500',
-        email: 'domingos.sebastiao@gmail.com',
-        contactPerson: 'Próprio',
-        creditLimit: 500000,
-        currentBalance: 171000,
-        totalInvoiced: 171000,
-        totalPaid: 0,
-      },
-    ];
-
-    const demoProducts: Product[] = [
-      {
-        id: 'prd_01',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        itemType: 'produto',
-        code: 'HW-POS-80',
-        barcode: '5609871230011',
-        description: 'Terminal POS Facturação Térmico 80mm Dual-Screen',
-        category: 'Hardware Comercial',
-        purchasePrice: 240000,
-        salePrice: 400000,
-        unit: 'UN',
-        taxRate: 14,
-        taxExemptionReason: 'Taxa Normal IVA 14%',
-        stock: 18,
-        minStock: 5,
-        warehouse: 'Armazém Central Luanda',
-        profitMargin: 67,
-      },
-      {
-        id: 'prd_02',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        itemType: 'servico',
-        code: 'SRV-IMPL-AGT',
-        barcode: '5609871230028',
-        description: 'Consultoria Técnica de Implementação e Parametrização SAF-T AO',
-        category: 'Serviços Profissionais',
-        purchasePrice: 0,
-        salePrice: 250000,
-        unit: 'UN',
-        taxRate: 14,
-        taxExemptionReason: 'Taxa Normal IVA 14%',
-        stock: 999,
-        minStock: 0,
-        warehouse: 'Sede Luanda',
-        profitMargin: 100,
-      },
-      {
-        id: 'prd_03',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        itemType: 'produto',
-        code: 'PAP-TERM-80',
-        barcode: '5609871230035',
-        description: 'Caixa 50 Rolos Papel Térmico 80x80mm Alta Durabilidade',
-        category: 'Consumíveis',
-        purchasePrice: 28000,
-        salePrice: 50000,
-        unit: 'CX',
-        taxRate: 14,
-        taxExemptionReason: 'Taxa Normal IVA 14%',
-        stock: 3,
-        minStock: 10,
-        warehouse: 'Armazém Central Luanda',
-        profitMargin: 79,
-      },
-    ];
-
-    const hash1 = await gerarAssinaturaHashAGT(today, 'FT 2026/1', 2280000, demoCompany.nif);
-    const hash2 = await gerarAssinaturaHashAGT(today, 'FT 2026/2', 456000, demoCompany.nif, hash1);
-    const hash3 = await gerarAssinaturaHashAGT(today, 'FR 2026/1', 1140000, demoCompany.nif, hash2);
-
-    const demoInvoices: Invoice[] = [
-      {
-        id: 'inv_01',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        docType: 'Factura',
-        series: 'FT 2026',
-        sequentialNumber: 1,
-        docNumber: 'FT 2026/1',
-        issueDate: today,
-        dueDate: today,
-        emitterName: demoCompany.name,
-        emitterNif: demoCompany.nif,
-        clientId: 'cli_01',
-        clientName: demoClients[0].name,
-        clientNif: demoClients[0].nif,
-        clientAddress: demoClients[0].address,
-        itemsSummary: JSON.stringify([
-          {
-            productId: 'prd_01',
-            code: 'HW-POS-80',
-            description: 'Terminal POS Facturação Térmico 80mm Dual-Screen',
-            quantity: 5,
-            unit: 'UN',
-            unitPrice: 400000,
-            discountPercent: 0,
-            taxRate: 14,
-            lineSubtotal: 2000000,
-            lineTax: 280000,
-            lineTotal: 2280000,
-          },
-        ] as InvoiceLineItem[]),
-        subtotal: 2000000,
-        discountTotal: 0,
-        taxTotal: 280000,
-        totalAmount: 2280000,
-        amountInWords: valorPorExtensoKz(2280000),
-        paymentTerms: '30 Dias',
-        paymentMethod: 'Transferência Bancária (IBAN)',
-        notes: 'Fornecimento de equipamentos POS para filiais de Luanda.',
-        qrCodePayload: gerarPayloadQrAGT({
-          emitterNif: demoCompany.nif,
-          clientNif: demoClients[0].nif,
-          docType: 'FT',
-          docNumber: 'FT 2026/1',
-          issueDate: today,
-          subtotal: 2000000,
-          taxTotal: 280000,
-          totalAmount: 2280000,
-          hashCode: hash1,
-        }),
-        hashCode: hash1,
-        softwareCertText: 'PREPARAÇÃO PARA CERTIFICAÇÃO AGT',
-        status: 'paga',
-        paidAmount: 2280000,
-        printCount: 0,
-        agtTransmissionStatus: 'preparacao_certificacao',
-      },
-      {
-        id: 'inv_02',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        docType: 'Factura',
-        series: 'FT 2026',
-        sequentialNumber: 2,
-        docNumber: 'FT 2026/2',
-        issueDate: today,
-        dueDate: today,
-        emitterName: demoCompany.name,
-        emitterNif: demoCompany.nif,
-        clientId: 'cli_01',
-        clientName: demoClients[0].name,
-        clientNif: demoClients[0].nif,
-        clientAddress: demoClients[0].address,
-        itemsSummary: JSON.stringify([
-          {
-            productId: 'prd_01',
-            code: 'HW-POS-80',
-            description: 'Terminal POS Facturação Térmico 80mm Dual-Screen',
-            quantity: 1,
-            unit: 'UN',
-            unitPrice: 400000,
-            discountPercent: 0,
-            taxRate: 14,
-            lineSubtotal: 400000,
-            lineTax: 56000,
-            lineTotal: 456000,
-          },
-        ] as InvoiceLineItem[]),
-        subtotal: 400000,
-        discountTotal: 0,
-        taxTotal: 56000,
-        totalAmount: 456000,
-        amountInWords: valorPorExtensoKz(456000),
-        paymentTerms: '15 Dias',
-        paymentMethod: 'Multicaixa Express',
-        notes: 'Unidade adicional para balcão de atendimento.',
-        qrCodePayload: gerarPayloadQrAGT({
-          emitterNif: demoCompany.nif,
-          clientNif: demoClients[0].nif,
-          docType: 'FT',
-          docNumber: 'FT 2026/2',
-          issueDate: today,
-          subtotal: 400000,
-          taxTotal: 56000,
-          totalAmount: 456000,
-          hashCode: hash2,
-        }),
-        hashCode: hash2,
-        softwareCertText: 'PREPARAÇÃO PARA CERTIFICAÇÃO AGT',
-        status: 'pendente',
-        paidAmount: 0,
-        printCount: 0,
-        agtTransmissionStatus: 'preparacao_certificacao',
-      },
-      {
-        id: 'inv_03',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        docType: 'Factura-Recibo',
-        series: 'FR 2026',
-        sequentialNumber: 1,
-        docNumber: 'FR 2026/1',
-        issueDate: today,
-        dueDate: today,
-        emitterName: demoCompany.name,
-        emitterNif: demoCompany.nif,
-        clientId: 'cli_02',
-        clientName: demoClients[1].name,
-        clientNif: demoClients[1].nif,
-        clientAddress: demoClients[1].address,
-        itemsSummary: JSON.stringify([
-          {
-            productId: 'prd_02',
-            code: 'SRV-IMPL-AGT',
-            description: 'Consultoria Técnica de Implementação e Parametrização SAF-T AO',
-            quantity: 4,
-            unit: 'UN',
-            unitPrice: 250000,
-            discountPercent: 0,
-            taxRate: 14,
-            lineSubtotal: 1000000,
-            lineTax: 140000,
-            lineTotal: 1140000,
-          },
-        ] as InvoiceLineItem[]),
-        subtotal: 1000000,
-        discountTotal: 0,
-        taxTotal: 140000,
-        totalAmount: 1140000,
-        amountInWords: valorPorExtensoKz(1140000),
-        paymentTerms: 'Pronto Pagamento',
-        paymentMethod: 'TPA / POS Multicaixa',
-        notes: 'Liquidação imediata no acto da emissão.',
-        qrCodePayload: gerarPayloadQrAGT({
-          emitterNif: demoCompany.nif,
-          clientNif: demoClients[1].nif,
-          docType: 'FR',
-          docNumber: 'FR 2026/1',
-          issueDate: today,
-          subtotal: 1000000,
-          taxTotal: 140000,
-          totalAmount: 1140000,
-          hashCode: hash3,
-        }),
-        hashCode: hash3,
-        softwareCertText: 'PREPARAÇÃO PARA CERTIFICAÇÃO AGT',
-        status: 'paga',
-        paidAmount: 1140000,
-        printCount: 0,
-        agtTransmissionStatus: 'preparacao_certificacao',
-      },
-    ];
-
-    setCompanies([demoCompany]);
-    setClients(demoClients);
-    setProducts(demoProducts);
-    setInvoices(demoInvoices);
-    setMovements([
-      {
-        id: 'mov_01',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        productId: 'prd_01',
-        productName: 'Terminal POS Facturação Térmico 80mm Dual-Screen',
-        movementType: 'entrada',
-        quantity: 24,
-        warehouseOrigin: 'Fornecedor ZEE Luanda',
-        warehouseDest: 'Armazém Central Luanda',
-        unitCost: 240000,
-        referenceDoc: 'FT-FORN-2026/088',
-        notes: 'Lote inicial importado',
-      },
-      {
-        id: 'mov_02',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        productId: 'prd_01',
-        productName: 'Terminal POS Facturação Térmico 80mm Dual-Screen',
-        movementType: 'saida',
-        quantity: 6,
-        warehouseOrigin: 'Armazém Central Luanda',
-        warehouseDest: 'Cliente Sonangol Dist.',
-        unitCost: 240000,
-        referenceDoc: 'FT 2026/1 & FT 2026/2',
-        notes: 'Saída automática por facturação',
-      },
-    ]);
-    setTransactions([
-      {
-        id: 'tx_01',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        txType: 'recebimento',
-        category: 'Vendas & Facturação',
-        description: 'Recebimento Factura FT 2026/1 — Sonangol Distribuidora',
-        amount: 2280000,
-        paymentMethod: 'transferencia',
-        accountName: 'BAI — Banco Angolano de Investimentos (AOA)',
-        referenceDoc: 'FT 2026/1',
-        entityName: 'Sonangol Distribuidora & Logística, S.A.',
-        status: 'reconciliado',
-        txDate: today,
-      },
-      {
-        id: 'tx_02',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        txType: 'recebimento',
-        category: 'Vendas & Facturação',
-        description: 'Recebimento Factura-Recibo FR 2026/1 — Supermercados Kero',
-        amount: 1140000,
-        paymentMethod: 'pos',
-        accountName: 'BAI — TPA Multicaixa',
-        referenceDoc: 'FR 2026/1',
-        entityName: 'Rede Supermercados Kero Angola, Lda.',
-        status: 'reconciliado',
-        txDate: today,
-      },
-      {
-        id: 'tx_03',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        txType: 'despesa',
-        category: 'Operações & Logística',
-        description: 'Arrendamento de Escritório e Armazém — Luanda',
-        amount: 650000,
-        paymentMethod: 'transferencia',
-        accountName: 'BAI — Banco Angolano de Investimentos (AOA)',
-        referenceDoc: 'REC-ARR-11/2026',
-        entityName: 'Imobiliária Baía de Luanda, S.A.',
-        status: 'liquidado',
-        txDate: today,
-      },
-    ]);
-    setSuppliers([
-      {
-        id: 'sup_01',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        name: 'Tecnologia & Sistemas ZEE Viana, Lda.',
-        nif: '5408819201',
-        phone: '+244 926 300 900',
-        email: 'vendas@tecnologiazee.ao',
-        address: 'Zona Económica Especial Luanda-Bengo',
-        category: 'Hardware & Consumíveis',
-        totalPurchased: 5760000,
-        balanceDue: 480000,
-      },
-    ]);
-    setTeamMembers([
-      {
-        id: 'tm_01',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        name: 'Eng. João Muatxissombo',
-        email: 'facturao@alhan.pro',
-        role: 'Administrador',
-        establishment: 'Sede Principal - Luanda',
-        permissionsSummary:
-          'Acesso Total: Facturação, SAF-T, AGT, Financeiro, Stock, Utilizadores e Configurações',
-        status: 'activo',
-      },
-      {
-        id: 'tm_02',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        name: 'Dra. Patrícia Lourenço',
-        email: 'contabilidade@kwanzasolutions.ao',
-        role: 'Contabilista',
-        establishment: 'Sede Principal - Luanda',
-        permissionsSummary:
-          'Acesso Fiscal e Contabilístico: SAF-T AO, Relatórios de IVA, Fluxo de Caixa e Facturas',
-        status: 'activo',
-      },
-    ]);
-    setTickets([
-      {
-        id: 'tkt_01',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        companyName: demoCompany.name,
-        subject: 'Verificação de Série FT 2026 para Exportação SAF-T AO',
-        description: 'Solicitamos confirmação sobre o código de isenção M00 para serviços isentos.',
-        category: 'Facturação & SAF-T AO',
-        priority: 'media',
-        attachmentRef: 'SAFT_AO_5402891045.xml',
-        status: 'respondido',
-        adminResponse:
-          'Confirmado pelo Suporte Técnico ALHAN (922 021 211): A série FT 2026 e a tabela de impostos estão em conformidade com o esquema AO_1.01_01.',
-      },
-    ]);
-    setAuditLogs([
-      {
-        id: 'log_01',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        actorEmail: 'facturao@alhan.pro',
-        actorRole: 'Administrador',
-        action: 'EMISSAO_FACTURA_FISCAL',
-        module: 'Facturação',
-        targetRef: 'FT 2026/1',
-        details: 'Emitida Factura FT 2026/1 no valor de 2.280.000,00 Kz com assinatura SHA-256.',
-      },
-    ]);
-    setSubscriptionPayments([
-      {
-        id: 'subpay_demo_01',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        companyName: demoCompany.name,
-        companyNif: demoCompany.nif,
-        planId: 'empresarial',
-        billingCycle: 'anual',
-        amountKz: 854400,
-        mcxChannelNumber: MCX_EXPRESS_OFFICIAL_NUMBER,
-        beneficiaryName: MCX_EXPRESS_BENEFICIARY,
-        orderReference: 'ALH-1045-88201',
-        transactionReference: 'MCX-AO-992817263',
-        paymentModality: 'confirmacao_administrativa',
-        proofFileName: 'Talao_Multicaixa_Express_ALHAN.jpg',
-        proofDataUrl: '',
-        paymentDeadline: today,
-        status: 'confirmado',
-        adminNotes: 'Pagamento Multicaixa Express (927 496 287 - ALHAN) confirmado pela Administração Central.',
-        receiptNumber: 'REC-ALHAN-2026/001',
-      },
-      {
-        id: 'subpay_demo_02',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        companyName: demoCompany.name,
-        companyNif: demoCompany.nif,
-        planId: 'profissional',
-        billingCycle: 'mensal',
-        amountKz: 42000,
-        mcxChannelNumber: MCX_EXPRESS_OFFICIAL_NUMBER,
-        beneficiaryName: MCX_EXPRESS_BENEFICIARY,
-        orderReference: 'ALH-1045-90412',
-        transactionReference: 'MCX-AO-994012884',
-        paymentModality: 'confirmacao_administrativa',
-        proofFileName: 'Comprovativo_MCX_Renovacao.png',
-        proofDataUrl: '',
-        paymentDeadline: today,
-        status: 'pendente',
-        adminNotes: 'Aguarda validação pela Administração Central ALHAN.',
-        receiptNumber: '',
-      },
-    ]);
-    setAgtLogs([
-      {
-        id: 'agtlog_demo_01',
-        ownerId: demoOwner,
-        companyId: demoCompId,
-        serviceName: 'registarFactura',
-        environment: 'homologacao',
-        targetRef: 'FT 2026/1',
-        jwsHeaderSummary: 'alg:HS256-PREP | kid:ALHAN-AGT-JWS-KEY-01 | typ:JOSE+JSON',
-        requestPayloadSummary: '{"taxRegistrationNumber":"5402891045","documentNo":"FT 2026/1","grossTotal":2280000}',
-        responsePayloadSummary: 'Pedido assinado com JWS e registado na fila de homologação AGT.',
-        httpStatus: 202,
-        resultStatus: 'pendente_transmissao',
-        operationId: 'AGT-OP-20261110-FT1',
-      },
-    ]);
-    setIsDemoMode(true);
-    setActiveTab('dashboard');
+    resetClientWorkspaceData();
+    try {
+      const storedAll = localStorage.getItem('alhan_clean_companies_v3');
+      if (storedAll) {
+        const parsed = JSON.parse(storedAll) as Company[];
+        if (Array.isArray(parsed)) {
+          setCompanies(parsed);
+        }
+      }
+    } catch {
+      // ignore
+    }
   };
 
   // Audit Log Helper
@@ -974,11 +547,11 @@ export default function App() {
     details: string,
     compIdOverride?: string
   ) => {
-    const compId = compIdOverride || activeCompany?.id || 'comp_demo';
+    const compId = compIdOverride || activeCompany?.id || 'comp_local';
     const actorEmail = currentUser?.email || activeCompany?.email || 'operador@empresa.ao';
     const newLog: AuditLog = {
       id: sanitizeId('log'),
-      ownerId: currentUser?.uid || 'demo_owner_ao',
+      ownerId: currentUser?.uid || 'local_owner_ao',
       companyId: compId,
       actorEmail: actorEmail.slice(0, 120),
       actorRole: activeRoleView,
@@ -1010,14 +583,13 @@ export default function App() {
     }
   };
 
-  // Register Company & Seed Initial Data in Firestore + Local Hostinger Session
+  // Register Company with 100% Clean Workspace (Zero Fictitious Data)
   const handleRegisterCompany = async (
     companyData: Omit<Company, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>,
-    seedInitialData: boolean
+    _seedInitialData: boolean
   ) => {
     const uid = currentUser?.uid || 'local_owner_ao';
     const compId = sanitizeId('comp');
-    const today = getLuandaIsoDate();
     const newCompanyObj: Company = {
       id: compId,
       ownerId: uid,
@@ -1025,38 +597,39 @@ export default function App() {
     };
 
     try {
-      localStorage.setItem('alhan_registered_company_v1', JSON.stringify(newCompanyObj));
+      localStorage.setItem('alhan_clean_active_company_v3', JSON.stringify(newCompanyObj));
+      const existingAllRaw = localStorage.getItem('alhan_clean_companies_v3');
+      const existingAll: Company[] = existingAllRaw ? JSON.parse(existingAllRaw) : [];
+      const updatedAll = [
+        newCompanyObj,
+        ...existingAll.filter((c) => c.id !== newCompanyObj.id && c.nif !== newCompanyObj.nif),
+      ];
+      localStorage.setItem('alhan_clean_companies_v3', JSON.stringify(updatedAll));
     } catch {
       // ignore storage quota errors
     }
 
-    // Always seed local state first so the user immediately enters their company panel even on Hostinger without Google OAuth
+    resetClientWorkspaceData();
+    setTeamMembers([
+      {
+        id: sanitizeId('tm'),
+        ownerId: uid,
+        companyId: compId,
+        name: companyData.responsibleName || 'Administrador',
+        email: companyData.email,
+        role: 'Administrador',
+        establishment: 'Sede Principal',
+        permissionsSummary:
+          'Acesso Total: Facturação, SAF-T, AGT, Financeiro, Stock, Utilizadores e Configurações',
+        status: 'activo',
+      },
+    ]);
+
     if (!currentUser) {
-      if (seedInitialData) {
-        await handleEnterDemoMode();
-      } else {
-        setClients([]);
-        setProducts([]);
-        setInvoices([]);
-        setMovements([]);
-        setTransactions([]);
-        setSuppliers([]);
-        setTeamMembers([
-          {
-            id: sanitizeId('tm'),
-            ownerId: uid,
-            companyId: compId,
-            name: companyData.responsibleName,
-            email: companyData.email,
-            role: 'Administrador',
-            establishment: 'Sede Principal',
-            permissionsSummary:
-              'Acesso Total: Facturação, SAF-T, AGT, Financeiro, Stock, Utilizadores e Configurações',
-            status: 'activo',
-          },
-        ]);
-      }
-      setCompanies([newCompanyObj]);
+      setCompanies((prev) => [
+        newCompanyObj,
+        ...prev.filter((c) => c.id !== newCompanyObj.id && c.nif !== newCompanyObj.nif),
+      ]);
       setIsDemoMode(true);
       setIsRegisterModalOpen(false);
       setIsAuthModalOpen(false);
@@ -1072,229 +645,44 @@ export default function App() {
         updatedAt: serverTimestamp(),
       });
 
-      if (seedInitialData) {
-        const client1Id = sanitizeId('cli');
-        const client2Id = sanitizeId('cli');
-        await setDoc(doc(db, 'clients', client1Id), {
-          ownerId: uid,
-          companyId: compId,
-          clientType: 'empresarial',
-          name: 'Sonangol Distribuidora & Logística, S.A.',
-          nif: '5401002938',
-          address: 'Rua Rainha Ginga, N.º 84, Luanda',
-          province: 'Luanda',
-          phone: '+244 923 110 220',
-          email: 'contabilidade@sonangoldist.ao',
-          contactPerson: 'Dr. Carlos Mendes',
-          creditLimit: 10000000,
-          currentBalance: 0,
-          totalInvoiced: 1140000,
-          totalPaid: 1140000,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+      const tm1Id = sanitizeId('tm');
+      await setDoc(doc(db, 'team_members', tm1Id), {
+        ownerId: uid,
+        companyId: compId,
+        name: companyData.responsibleName || 'Administrador',
+        email: companyData.email,
+        role: 'Administrador',
+        establishment: 'Sede Principal',
+        permissionsSummary:
+          'Acesso Total: Facturação, SAF-T, AGT, Financeiro, Stock, Utilizadores e Configurações',
+        status: 'activo',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
 
-        await setDoc(doc(db, 'clients', client2Id), {
-          ownerId: uid,
-          companyId: compId,
-          clientType: 'empresarial',
-          name: 'Grupo Comercial Benguela Sul, Lda.',
-          nif: '5403991827',
-          address: 'Avenida Acácias Rubras, Benguela',
-          province: 'Benguela',
-          phone: '+244 924 880 110',
-          email: 'financeiro@benguelasul.ao',
-          contactPerson: 'Dra. Helena Silva',
-          creditLimit: 5000000,
-          currentBalance: 456000,
-          totalInvoiced: 456000,
-          totalPaid: 0,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-
-        const prod1Id = sanitizeId('prd');
-        const prod2Id = sanitizeId('prd');
-        await setDoc(doc(db, 'products', prod1Id), {
-          ownerId: uid,
-          companyId: compId,
-          itemType: 'produto',
-          code: 'HW-POS-80',
-          barcode: '5609871230011',
-          description: 'Terminal POS Facturação Térmico 80mm Dual-Screen',
-          category: 'Hardware Comercial',
-          purchasePrice: 240000,
-          salePrice: 400000,
-          unit: 'UN',
-          taxRate: 14,
-          taxExemptionReason: 'Taxa Normal IVA 14%',
-          stock: 15,
-          minStock: 5,
-          warehouse: 'Armazém Central Luanda',
-          profitMargin: 67,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-
-        await setDoc(doc(db, 'products', prod2Id), {
-          ownerId: uid,
-          companyId: compId,
-          itemType: 'servico',
-          code: 'SRV-CONS-AO',
-          barcode: '5609871230028',
-          description: 'Consultoria de Gestão Empresarial e Conformidade Fiscal',
-          category: 'Serviços Profissionais',
-          purchasePrice: 0,
-          salePrice: 250000,
-          unit: 'UN',
-          taxRate: 14,
-          taxExemptionReason: 'Taxa Normal IVA 14%',
-          stock: 999,
-          minStock: 0,
-          warehouse: 'Sede Luanda',
-          profitMargin: 100,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-
-        const inv1Id = sanitizeId('inv');
-        const hash1 = await gerarAssinaturaHashAGT(today, 'FT 2026/1', 1140000, companyData.nif);
-        const qr1 = gerarPayloadQrAGT({
-          emitterNif: companyData.nif,
-          clientNif: '5401002938',
-          docType: 'FT',
-          docNumber: 'FT 2026/1',
-          issueDate: today,
-          subtotal: 1000000,
-          taxTotal: 140000,
-          totalAmount: 1140000,
-          hashCode: hash1,
-        });
-
-        await setDoc(doc(db, 'invoices', inv1Id), {
-          ownerId: uid,
-          companyId: compId,
-          docType: 'Factura',
-          series: 'FT 2026',
-          sequentialNumber: 1,
-          docNumber: 'FT 2026/1',
-          issueDate: today,
-          dueDate: today,
-          emitterName: companyData.name,
-          emitterNif: companyData.nif,
-          clientId: client1Id,
-          clientName: 'Sonangol Distribuidora & Logística, S.A.',
-          clientNif: '5401002938',
-          clientAddress: 'Rua Rainha Ginga, N.º 84, Luanda',
-          itemsSummary: JSON.stringify([
-            {
-              productId: prod2Id,
-              code: 'SRV-CONS-AO',
-              description: 'Consultoria de Gestão Empresarial e Conformidade Fiscal',
-              quantity: 4,
-              unit: 'UN',
-              unitPrice: 250000,
-              discountPercent: 0,
-              taxRate: 14,
-              lineSubtotal: 1000000,
-              lineTax: 140000,
-              lineTotal: 1140000,
-            },
-          ]),
-          subtotal: 1000000,
-          discountTotal: 0,
-          taxTotal: 140000,
-          totalAmount: 1140000,
-          amountInWords: valorPorExtensoKz(1140000),
-          paymentTerms: '30 Dias',
-          paymentMethod: 'Transferência Bancária (IBAN)',
-          notes: 'Prestação de serviços técnicos mensais.',
-          qrCodePayload: qr1,
-          hashCode: hash1,
-          softwareCertText: 'PREPARAÇÃO PARA CERTIFICAÇÃO AGT',
-          status: 'paga',
-          paidAmount: 1140000,
-          printCount: 0,
-          agtTransmissionStatus: 'preparacao_certificacao',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-
-        const tx1Id = sanitizeId('tx');
-        await setDoc(doc(db, 'financial_transactions', tx1Id), {
-          ownerId: uid,
-          companyId: compId,
-          txType: 'recebimento',
-          category: 'Facturação Clientes',
-          description: 'Liquidação Factura FT 2026/1 — Sonangol Distribuidora',
-          amount: 1140000,
-          paymentMethod: 'transferencia',
-          accountName: `${companyData.bankName} (AOA)`,
-          referenceDoc: 'FT 2026/1',
-          entityName: 'Sonangol Distribuidora & Logística, S.A.',
-          status: 'reconciliado',
-          txDate: today,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-
-        const sup1Id = sanitizeId('sup');
-        await setDoc(doc(db, 'suppliers', sup1Id), {
-          ownerId: uid,
-          companyId: compId,
-          name: 'Tecnologia & Sistemas ZEE Viana, Lda.',
-          nif: '5408819201',
-          phone: '+244 926 300 900',
-          email: 'vendas@tecnologiazee.ao',
-          address: 'Zona Económica Especial Luanda-Bengo',
-          category: 'Hardware Comercial',
-          totalPurchased: 3600000,
-          balanceDue: 0,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-
-        const tm1Id = sanitizeId('tm');
-        await setDoc(doc(db, 'team_members', tm1Id), {
-          ownerId: uid,
-          companyId: compId,
-          name: companyData.responsibleName,
-          email: companyData.email,
-          role: 'Administrador',
-          establishment: 'Sede Principal',
-          permissionsSummary:
-            'Acesso Total: Facturação, SAF-T, AGT, Financeiro, Stock, Utilizadores e Configurações',
-          status: 'activo',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-
-        await logAuditEvent(
-          'REGISTO_EMPRESA_INICIAL',
-          'Empresas',
-          companyData.nif,
-          `Empresa ${companyData.name} registada com plano ${companyData.planId.toUpperCase()}.`,
-          compId
-        );
-      }
+      await logAuditEvent(
+        'REGISTO_EMPRESA_INICIAL',
+        'Empresas',
+        companyData.nif,
+        `Empresa ${companyData.name} registada com plano ${companyData.planId.toUpperCase()}.`,
+        compId
+      );
       setIsRegisterModalOpen(false);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `companies/${compId}`);
     }
   };
 
-  // Calculate Invoice Builder Totals (with 14% IVA, 6.5% Retencao na Fonte, and 60% Black Friday option)
+  // Calculate Invoice Builder Totals (with 14% IVA and 6.5% Retencao na Fonte)
   const invoiceDraftTotals = useMemo(() => {
     let subtotal = 0;
     let discountTotal = 0;
     let taxTotal = 0;
-    const detailedLines: InvoiceLineItem[] = lineItems.map((line) => {
-      const prod = products.find((p) => p.id === line.productId) || products[0];
-      const unitPrice = prod ? prod.salePrice : 0;
+    const detailedLines: InvoiceLineItem[] = lineItems.map((line, idx) => {
+      const prod = products.find((p) => p.id === line.productId);
+      const unitPrice = prod ? prod.salePrice : Number(line.customUnitPrice) || 0;
       const qty = Math.max(1, Number(line.quantity) || 1);
-      const discPct = applyBlackFriday60
-        ? BLACK_FRIDAY_DISCOUNT_PERCENT
-        : Math.min(100, Math.max(0, Number(line.discountPercent) || 0));
+      const discPct = Math.min(100, Math.max(0, Number(line.discountPercent) || 0));
       const grossLine = unitPrice * qty;
       const lineDisc = (grossLine * discPct) / 100;
       const lineSubtotal = grossLine - lineDisc;
@@ -1307,9 +695,9 @@ export default function App() {
       taxTotal += lineTax;
 
       return {
-        productId: prod?.id || 'item_01',
-        code: prod?.code || 'ITEM',
-        description: prod?.description || 'Artigo Comercial',
+        productId: prod?.id || `item_${idx + 1}`,
+        code: prod?.code || `ART-${idx + 1}`,
+        description: prod?.description || line.customDescription?.trim() || 'Prestação de Serviços / Artigo Comercial',
         quantity: qty,
         unit: prod?.unit || 'UN',
         unitPrice,
@@ -1327,9 +715,6 @@ export default function App() {
       ? (subtotal * RETENCAO_FONTE_RATE_AO) / 100
       : 0;
     const netPayableAmount = Math.max(0, totalAmount - withholdingTaxTotal);
-    const blackFridayApplied =
-      applyBlackFriday60 ||
-      detailedLines.some((l) => Number(l.discountPercent) >= BLACK_FRIDAY_DISCOUNT_PERCENT);
 
     return {
       subtotal,
@@ -1339,19 +724,23 @@ export default function App() {
       withholdingTaxRate,
       withholdingTaxTotal,
       netPayableAmount,
-      blackFridayApplied,
       amountInWords: valorPorExtensoKz(totalAmount),
       detailedLines,
     };
-  }, [lineItems, products, applyWithholding65, applyBlackFriday60]);
+  }, [lineItems, products, applyWithholding65]);
 
   // Issue Fiscal or Commercial Document
   const handleIssueDocument = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeCompany || invoiceDraftTotals.detailedLines.length === 0) return;
 
-    const client = clients.find((c) => c.id === selectedClientId) || clients[0];
-    if (!client) return;
+    const registeredClient = clients.find((c) => c.id === selectedClientId) || clients[0];
+    const resolvedClientName =
+      registeredClient?.name || customClientName.trim() || 'Consumidor Final';
+    const resolvedClientNif =
+      registeredClient?.nif || customClientNif.trim() || '999999999';
+    const resolvedClientAddress = registeredClient?.address || 'Luanda, Angola';
+    const resolvedClientId = registeredClient?.id || 'cli_consumidor_final';
 
     const seriesPrefix = DOC_SERIES_PREFIX[docType] || series;
     const docsInSeries = invoices.filter((i) => i.series === seriesPrefix);
@@ -1370,7 +759,7 @@ export default function App() {
     );
     const qrCodePayload = gerarPayloadQrAGT({
       emitterNif: activeCompany.nif,
-      clientNif: client.nif,
+      clientNif: resolvedClientNif,
       docType,
       docNumber,
       issueDate,
@@ -1393,10 +782,10 @@ export default function App() {
       dueDate,
       emitterName: activeCompany.name,
       emitterNif: activeCompany.nif,
-      clientId: client.id,
-      clientName: client.name,
-      clientNif: client.nif,
-      clientAddress: client.address || 'Luanda, Angola',
+      clientId: resolvedClientId,
+      clientName: resolvedClientName,
+      clientNif: resolvedClientNif,
+      clientAddress: resolvedClientAddress,
       itemsSummary: JSON.stringify(invoiceDraftTotals.detailedLines).slice(0, 1990),
       subtotal: invoiceDraftTotals.subtotal,
       discountTotal: invoiceDraftTotals.discountTotal,
@@ -1405,7 +794,7 @@ export default function App() {
       withholdingTaxTotal: invoiceDraftTotals.withholdingTaxTotal,
       totalAmount: invoiceDraftTotals.totalAmount,
       netPayableAmount: invoiceDraftTotals.netPayableAmount,
-      blackFridayApplied: invoiceDraftTotals.blackFridayApplied,
+      blackFridayApplied: false,
       amountInWords: invoiceDraftTotals.amountInWords.slice(0, 290),
       paymentTerms: paymentTerms.slice(0, 100),
       paymentMethod: paymentMethod.slice(0, 60),
@@ -1433,12 +822,12 @@ export default function App() {
             companyId: newInv.companyId,
             txType: 'recebimento',
             category: 'Facturação',
-            description: `Recebimento imediato ${newInv.docNumber} — ${client.name}`,
+            description: `Recebimento imediato ${newInv.docNumber} — ${resolvedClientName}`,
             amount: newInv.totalAmount,
             paymentMethod: 'transferencia',
-            accountName: `${activeCompany.bankName} (AOA)`,
+            accountName: `${activeCompany.bankName || activeCompany.name} (AOA)`,
             referenceDoc: newInv.docNumber,
-            entityName: client.name,
+            entityName: resolvedClientName,
             status: 'liquidado',
             txDate: issueDate,
           },
@@ -1463,15 +852,17 @@ export default function App() {
         updatedAt: serverTimestamp(),
       });
 
-      // Update client balance & totals
-      const addedDebt = isImmediatePaid ? 0 : newInv.totalAmount;
-      const addedPaid = isImmediatePaid ? newInv.totalAmount : 0;
-      await updateDoc(doc(db, 'clients', client.id), {
-        totalInvoiced: client.totalInvoiced + newInv.totalAmount,
-        totalPaid: client.totalPaid + addedPaid,
-        currentBalance: client.currentBalance + addedDebt,
-        updatedAt: serverTimestamp(),
-      });
+      // Update client balance & totals if registered
+      if (registeredClient) {
+        const addedDebt = isImmediatePaid ? 0 : newInv.totalAmount;
+        const addedPaid = isImmediatePaid ? newInv.totalAmount : 0;
+        await updateDoc(doc(db, 'clients', registeredClient.id), {
+          totalInvoiced: registeredClient.totalInvoiced + newInv.totalAmount,
+          totalPaid: registeredClient.totalPaid + addedPaid,
+          currentBalance: registeredClient.currentBalance + addedDebt,
+          updatedAt: serverTimestamp(),
+        });
+      }
 
       // Deduct stock for physical products on Factura / Factura-Recibo / Guia
       if (['Factura', 'Factura-Recibo', 'Guia de Remessa'].includes(docType)) {
@@ -1493,12 +884,12 @@ export default function App() {
           companyId: newInv.companyId,
           txType: 'recebimento',
           category: 'Facturação',
-          description: `Recebimento automático ${newInv.docNumber} — ${client.name}`.slice(0, 195),
+          description: `Recebimento automático ${newInv.docNumber} — ${resolvedClientName}`.slice(0, 195),
           amount: newInv.totalAmount,
           paymentMethod: 'transferencia',
-          accountName: `${activeCompany.bankName} (AOA)`.slice(0, 95),
+          accountName: `${activeCompany.bankName || activeCompany.name} (AOA)`.slice(0, 95),
           referenceDoc: newInv.docNumber,
-          entityName: client.name.slice(0, 155),
+          entityName: resolvedClientName.slice(0, 155),
           status: 'liquidado',
           txDate: issueDate,
           createdAt: serverTimestamp(),
@@ -1765,7 +1156,7 @@ export default function App() {
     return list;
   }, [dashboardMetrics, activeCompany?.subscriptionEndDate]);
 
-  // Role-Based Menu Visibility
+  // Role-Based Menu Visibility (Note: ALHAN Master Admin Panel is strictly hidden from client workspaces)
   const allowedTabsForRole = useMemo((): WorkspaceTab[] => {
     switch (activeRoleView) {
       case 'Administrador':
@@ -1782,7 +1173,6 @@ export default function App() {
           'reports',
           'users',
           'support',
-          ...(isCentralAlhanAdmin ? (['alhan_admin'] as WorkspaceTab[]) : []),
         ];
       case 'Gerente':
         return [
@@ -1809,7 +1199,204 @@ export default function App() {
       default:
         return ['dashboard', 'invoicing'];
     }
-  }, [activeRoleView, isCentralAlhanAdmin]);
+  }, [activeRoleView]);
+
+  // Render Hidden Master Admin Portal when accessed via /painel-adm-alhan or /?adm=alhan
+  if (isHiddenAdminRoute) {
+    return (
+      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+        <div className="max-w-7xl mx-auto p-4 sm:p-6">
+          <AlhanAdminPanel
+            requireMasterLoginGate={true}
+            isMasterAuthenticated={isMasterAdminAuthenticated}
+            onMasterAuthenticated={async () => {
+              try {
+                sessionStorage.setItem('alhan_master_admin_session_v1', 'authenticated');
+              } catch {
+                // ignore
+              }
+              if (companies.length === 0) {
+                await handleEnterDemoMode();
+              }
+              setIsMasterAdminAuthenticated(true);
+            }}
+            onMasterLogout={() => {
+              try {
+                sessionStorage.removeItem('alhan_master_admin_session_v1');
+              } catch {
+                // ignore
+              }
+              setIsMasterAdminAuthenticated(false);
+            }}
+            onExitHiddenAdmin={() => {
+              setIsHiddenAdminRoute(false);
+              if (typeof window !== 'undefined') {
+                window.history.pushState({}, '', '/');
+              }
+            }}
+            companies={companies}
+            invoices={invoices}
+            tickets={tickets}
+            auditLogs={auditLogs}
+            plans={plans}
+            subscriptionPayments={subscriptionPayments}
+            onUpdatePlans={setPlans}
+            onUpdateCompanyStatus={async (comp, newStatus: SubscriptionStatusType) => {
+              setCompanies((prev) => {
+                const updated = prev.map((c) =>
+                  c.id === comp.id ? { ...c, subscriptionStatus: newStatus } : c
+                );
+                persistCompaniesList(updated);
+                return updated;
+              });
+              if (!isDemoMode && currentUser) {
+                try {
+                  await updateDoc(doc(db, 'companies', comp.id), {
+                    subscriptionStatus: newStatus,
+                    updatedAt: serverTimestamp(),
+                  });
+                } catch {
+                  // local update already persisted
+                }
+              }
+              await logAuditEvent(
+                'ALTERAR_ESTADO_SUBSCRICAO',
+                'Admin Central ALHAN',
+                comp.nif,
+                `Estado da licença da empresa ${comp.name} alterado para ${newStatus.toUpperCase()}.`
+              );
+            }}
+            onUpdateCompanyDetails={async (companyId, updates) => {
+              setCompanies((prev) => {
+                const updated = prev.map((c) => (c.id === companyId ? { ...c, ...updates } : c));
+                persistCompaniesList(updated);
+                return updated;
+              });
+              if (!isDemoMode && currentUser) {
+                try {
+                  await updateDoc(doc(db, 'companies', companyId), {
+                    ...updates,
+                    updatedAt: serverTimestamp(),
+                  });
+                } catch {
+                  // ignore
+                }
+              }
+            }}
+            onCreateClientCompany={async (companyData, clientPassword, paidAmountKz) => {
+              const newId = sanitizeId('comp');
+              const newCompany: Company = {
+                id: newId,
+                ownerId: currentUser?.uid || 'alhan_admin_managed',
+                ...companyData,
+              };
+              saveClientAccessPassword(newId, clientPassword);
+              setCompanies((prev) => {
+                const updated = [newCompany, ...prev];
+                persistCompaniesList(updated);
+                return updated;
+              });
+              if (paidAmountKz > 0) {
+                const payRecord: SubscriptionPayment = {
+                  id: sanitizeId('subpay'),
+                  ownerId: newCompany.ownerId,
+                  companyId: newId,
+                  companyName: newCompany.name,
+                  companyNif: newCompany.nif,
+                  planId: newCompany.planId,
+                  billingCycle: newCompany.billingCycle,
+                  amountKz: paidAmountKz,
+                  mcxChannelNumber: MCX_EXPRESS_OFFICIAL_NUMBER,
+                  beneficiaryName: MCX_EXPRESS_BENEFICIARY,
+                  orderReference: `ALH-${newCompany.nif.slice(-4)}-${Date.now().toString().slice(-4)}`,
+                  transactionReference: `MCX-ADM-${Date.now().toString().slice(-6)}`,
+                  paymentModality: 'confirmacao_administrativa',
+                  proofFileName: 'Activacao_Directa_Painel_ADM.pdf',
+                  proofDataUrl: '',
+                  paymentDeadline: getLuandaIsoDate(),
+                  status: newCompany.subscriptionStatus === 'activa' ? 'confirmado' : 'pendente',
+                  adminNotes: 'Cliente registado e activado directamente no Painel ADM ALHAN.',
+                  receiptNumber:
+                    newCompany.subscriptionStatus === 'activa'
+                      ? `REC-ALHAN-${Date.now().toString().slice(-5)}`
+                      : '',
+                };
+                setSubscriptionPayments((prev) => [payRecord, ...prev]);
+              }
+              await logAuditEvent(
+                'CADASTRAR_CLIENTE_POS_VENDA',
+                'Admin Central ALHAN',
+                newCompany.nif,
+                `Registado novo cliente ${newCompany.name} no plano ${newCompany.planId.toUpperCase()} (${newCompany.billingCycle}).`
+              );
+            }}
+            onDeleteClientCompany={async (companyId) => {
+              setCompanies((prev) => {
+                const updated = prev.filter((c) => c.id !== companyId);
+                persistCompaniesList(updated);
+                return updated;
+              });
+            }}
+            onInspectClientCompany={(comp) => {
+              setCompanies((prev) => [comp, ...prev.filter((c) => c.id !== comp.id)]);
+              setIsDemoMode(true);
+              setIsInspectingClientFromAdmin(true);
+              setIsHiddenAdminRoute(false);
+              setActiveTab('dashboard');
+            }}
+            onValidateSubscriptionPayment={async (payment, decision, adminNotes) => {
+              const today = getLuandaIsoDate();
+              const newEndDate = calcularDataVencimentoSubscricao(today, payment.billingCycle);
+              const generatedReceipt =
+                decision === 'confirmado'
+                  ? payment.receiptNumber || `REC-ALHAN-${Date.now().toString().slice(-5)}`
+                  : payment.receiptNumber;
+
+              setSubscriptionPayments((prev) =>
+                prev.map((p) =>
+                  p.id === payment.id
+                    ? {
+                        ...p,
+                        status: decision,
+                        adminNotes,
+                        receiptNumber: generatedReceipt,
+                      }
+                    : p
+                )
+              );
+              if (decision === 'confirmado') {
+                setCompanies((prev) => {
+                  const updated = prev.map((c) =>
+                    c.id === payment.companyId
+                      ? {
+                          ...c,
+                          planId: payment.planId,
+                          billingCycle: payment.billingCycle,
+                          subscriptionStatus: 'activa' as SubscriptionStatusType,
+                          subscriptionStartDate: today,
+                          subscriptionEndDate: newEndDate,
+                        }
+                      : c
+                  );
+                  persistCompaniesList(updated);
+                  return updated;
+                });
+              }
+            }}
+            onRespondTicket={async (tkt, responseText, newStatus) => {
+              setTickets((prev) =>
+                prev.map((t) =>
+                  t.id === tkt.id ? { ...t, adminResponse: responseText, status: newStatus } : t
+                )
+              );
+            }}
+            onBroadcastNotice={(title, message) => setGlobalNotice({ title, message })}
+          />
+        </div>
+        <OfflineIndicator pendingSyncCount={offlineQueueCount} />
+      </div>
+    );
+  }
 
   // Render Company Registration Wizard if user opened registration modal OR is authenticated without a company
   if (isRegisterModalOpen || (currentUser && !isDemoMode && companies.length === 0)) {
@@ -1835,6 +1422,13 @@ export default function App() {
 
   // Render Landing Page if not logged in and not in Demo Mode
   if (!currentUser && !isDemoMode) {
+    const openHiddenAdminGate = () => {
+      setIsHiddenAdminRoute(true);
+      if (typeof window !== 'undefined') {
+        window.history.pushState({}, '', '/painel-adm-alhan');
+      }
+    };
+
     return (
       <>
         <LandingPage
@@ -1847,8 +1441,7 @@ export default function App() {
             setIsAuthModalOpen(false);
             setIsRegisterModalOpen(true);
           }}
-          onEnterDemoMode={handleEnterDemoMode}
-          onOpenDocs={() => setIsDocsOpen(true)}
+          onOpenAdminGate={openHiddenAdminGate}
           isSigningIn={isSigningIn}
         />
         <AuthModal
@@ -1862,10 +1455,18 @@ export default function App() {
             setIsRegisterModalOpen(true);
           }}
           onTryGoogleSignIn={() => handleSignInGoogle()}
-          onEnterDemoMode={handleEnterDemoMode}
+          onOpenAdminGate={openHiddenAdminGate}
+          onMasterAdminDirectLogin={() => {
+            try {
+              sessionStorage.setItem('alhan_master_admin_session_v1', 'authenticated');
+            } catch {
+              // ignore
+            }
+            setIsMasterAdminAuthenticated(true);
+            openHiddenAdminGate();
+          }}
           isSigningInGoogle={isSigningIn}
         />
-        <DocumentationModal isOpen={isDocsOpen} onClose={() => setIsDocsOpen(false)} />
         <OfflineIndicator pendingSyncCount={offlineQueueCount} />
       </>
     );
@@ -1886,7 +1487,6 @@ export default function App() {
     { id: 'reports', label: 'Relatórios (PDF/Excel)', icon: BarChart3 },
     { id: 'users', label: 'Utilizadores & Auditoria', icon: Shield },
     { id: 'support', label: 'Suporte & Subscrição', icon: HelpCircle },
-    { id: 'alhan_admin', label: 'Painel Central ALHAN', icon: Building2 },
   ];
 
   const visibleNavItems = navItems.filter((item) => allowedTabsForRole.includes(item.id));
@@ -1906,20 +1506,26 @@ export default function App() {
       {/* Left Sidebar Navigation (260px Workspace Canvas) */}
       <aside className="w-64 shrink-0 bg-slate-950 text-slate-300 border-r border-slate-800 hidden lg:flex flex-col justify-between">
         <div className="p-5 space-y-6">
-          {/* Brand Lockup with Official ALHAN Logo */}
+          {/* Client Company Identity Lockup */}
           <div className="flex items-center justify-between border-b border-slate-800 pb-4 gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
-              <img
-                src={ALHAN_OFFICIAL_LOGO_URL}
-                alt="ALHAN"
-                className="h-8 w-auto rounded bg-white px-1.5 py-0.5 object-contain shrink-0"
-              />
+              {activeCompany.logoUrl ? (
+                <img
+                  src={activeCompany.logoUrl}
+                  alt={activeCompany.name}
+                  className="h-9 w-auto max-w-[44px] rounded bg-white p-1 object-contain shrink-0"
+                />
+              ) : (
+                <div className="w-9 h-9 rounded-lg bg-sky-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                  {(activeCompany.commercialName || activeCompany.name || 'EM').slice(0, 2).toUpperCase()}
+                </div>
+              )}
               <div className="min-w-0">
                 <span className="text-sm font-bold tracking-tight text-white font-display block truncate">
-                  ALHAN FACTURA
+                  {activeCompany.commercialName || activeCompany.name}
                 </span>
                 <span className="text-[11px] text-sky-400 font-mono block truncate">
-                  {activeCompany.commercialName}
+                  NIF: {activeCompany.nif}
                 </span>
               </div>
             </div>
@@ -1974,23 +1580,19 @@ export default function App() {
           </nav>
         </div>
 
-        {/* Sidebar Footer: Company NIF & Support */}
-        <div className="p-4 border-t border-slate-800 space-y-3 text-xs">
+        {/* Sidebar Footer: Client Company Details Only */}
+        <div className="p-4 border-t border-slate-800 space-y-2 text-xs">
           <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
             <p className="text-white font-semibold truncate">{activeCompany.name}</p>
             <p className="font-mono text-[11px] text-slate-400">NIF: {activeCompany.nif}</p>
+            {activeCompany.phone && (
+              <p className="font-mono text-[11px] text-slate-400 truncate">
+                Tel: {activeCompany.phone}
+              </p>
+            )}
             <p className="text-[11px] text-amber-400 font-mono">
-              Modo: Preparação Cert. AGT
+              Regime: {activeCompany.taxRegime}
             </p>
-          </div>
-          <div className="flex items-center justify-between text-[11px] text-slate-400">
-            <span>Suporte: 922 021 211</span>
-            <button
-              onClick={() => setIsDocsOpen(true)}
-              className="text-sky-400 hover:underline"
-            >
-              Docs VPS
-            </button>
           </div>
         </div>
       </aside>
@@ -2125,6 +1727,47 @@ export default function App() {
             </button>
           ))}
         </div>
+
+        {/* Admin Remote Client Inspection Return Bar */}
+        {isInspectingClientFromAdmin && (
+          <div className="px-6 py-2.5 bg-amber-500 text-slate-950 text-xs font-bold flex flex-wrap items-center justify-between gap-2">
+            <span>
+              MODO CONTROLO ADM ALHAN — A gerir conta do cliente:{' '}
+              <strong className="underline">{activeCompany.name}</strong> (NIF: {activeCompany.nif} · Licença:{' '}
+              {activeCompany.subscriptionStatus.toUpperCase()})
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setIsInspectingClientFromAdmin(false);
+                setIsHiddenAdminRoute(true);
+              }}
+              className="px-3 py-1 rounded bg-slate-950 text-white hover:bg-slate-800 font-bold text-xs"
+            >
+              ← Voltar ao Painel ADM Oculto
+            </button>
+          </div>
+        )}
+
+        {/* Suspended License Warning Banner */}
+        {activeCompany.subscriptionStatus === 'suspensa' && (
+          <div className="px-6 py-3 bg-red-700 text-white text-xs font-semibold flex flex-wrap items-center justify-between gap-2">
+            <span>
+              ATENÇÃO: A subscrição da empresa {activeCompany.name} encontra-se SUSPENSA. Regularize via Multicaixa Express ({MCX_EXPRESS_OFFICIAL_NUMBER} — {MCX_EXPRESS_BENEFICIARY}) para restabelecer todas as emissões.
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setMcxCheckoutPlan(activeCompany.planId);
+                setMcxCheckoutCycle(activeCompany.billingCycle);
+                setIsMcxCheckoutOpen(true);
+              }}
+              className="px-3 py-1 rounded bg-white text-red-800 font-bold"
+            >
+              Regularizar Agora
+            </button>
+          </div>
+        )}
 
         {/* Global Broadcast Banner if published by ALHAN Admin */}
         {globalNotice && (
@@ -2493,18 +2136,46 @@ export default function App() {
                   </div>
 
                   <div className="sm:col-span-2">
-                    <label className="block font-semibold mb-1">Cliente Destinatário *</label>
-                    <select
-                      value={selectedClientId}
-                      onChange={(e) => setSelectedClientId(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 bg-white dark:bg-slate-800"
-                    >
-                      {clients.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} — NIF: {c.nif} ({c.province})
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block font-semibold">Cliente Destinatário *</label>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('clients')}
+                        className="text-[11px] text-sky-600 hover:underline font-semibold"
+                      >
+                        + Cadastrar Cliente
+                      </button>
+                    </div>
+                    {clients.length > 0 ? (
+                      <select
+                        value={selectedClientId}
+                        onChange={(e) => setSelectedClientId(e.target.value)}
+                        className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 bg-white dark:bg-slate-800"
+                      >
+                        {clients.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} — NIF: {c.nif} ({c.province})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          value={customClientName}
+                          onChange={(e) => setCustomClientName(e.target.value)}
+                          placeholder="Nome do Cliente (ou Consumidor Final)"
+                          className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 bg-transparent"
+                        />
+                        <input
+                          type="text"
+                          value={customClientNif}
+                          onChange={(e) => setCustomClientNif(e.target.value)}
+                          placeholder="NIF do Cliente (Ex: 999999999)"
+                          className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-mono bg-transparent"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -2564,25 +2235,10 @@ export default function App() {
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => {
-                          const nextState = !applyBlackFriday60;
-                          setApplyBlackFriday60(nextState);
-                          setLineItems((prev) =>
-                            prev.map((item) => ({
-                              ...item,
-                              discountPercent: nextState ? BLACK_FRIDAY_DISCOUNT_PERCENT : 0,
-                            }))
-                          );
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors border ${
-                          applyBlackFriday60
-                            ? 'bg-rose-600 text-white border-rose-500 shadow-sm'
-                            : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 hover:bg-rose-100'
-                        }`}
+                        onClick={() => setActiveTab('products')}
+                        className="text-xs text-sky-600 hover:underline font-semibold mr-2"
                       >
-                        {applyBlackFriday60
-                          ? `Promoção Black Friday (-${BLACK_FRIDAY_DISCOUNT_PERCENT}%) Activa`
-                          : `Aplicar Promoção Black Friday (-${BLACK_FRIDAY_DISCOUNT_PERCENT}%)`}
+                        + Cadastrar Artigo no Catálogo
                       </button>
 
                       <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs font-semibold cursor-pointer">
@@ -2602,10 +2258,10 @@ export default function App() {
                             ...lineItems,
                             {
                               productId: products[0]?.id || '',
+                              customDescription: '',
+                              customUnitPrice: 0,
                               quantity: 1,
-                              discountPercent: applyBlackFriday60
-                                ? BLACK_FRIDAY_DISCOUNT_PERCENT
-                                : 0,
+                              discountPercent: 0,
                             },
                           ])
                         }
@@ -2626,21 +2282,49 @@ export default function App() {
                           className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800"
                         >
                           <div className="sm:col-span-5">
-                            <select
-                              value={line.productId}
-                              onChange={(e) => {
-                                const copy = [...lineItems];
-                                copy[idx].productId = e.target.value;
-                                setLineItems(copy);
-                              }}
-                              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 bg-white dark:bg-slate-900"
-                            >
-                              {products.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.code} — {p.description} ({formatKz(p.salePrice)} | IVA {p.taxRate || IVA_STANDARD_RATE_AO}%)
-                                </option>
-                              ))}
-                            </select>
+                            {products.length > 0 ? (
+                              <select
+                                value={line.productId}
+                                onChange={(e) => {
+                                  const copy = [...lineItems];
+                                  copy[idx].productId = e.target.value;
+                                  setLineItems(copy);
+                                }}
+                                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 bg-white dark:bg-slate-900"
+                              >
+                                {products.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.code} — {p.description} ({formatKz(p.salePrice)} | IVA {p.taxRate || IVA_STANDARD_RATE_AO}%)
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <input
+                                  type="text"
+                                  value={line.customDescription || ''}
+                                  onChange={(e) => {
+                                    const copy = [...lineItems];
+                                    copy[idx].customDescription = e.target.value;
+                                    setLineItems(copy);
+                                  }}
+                                  placeholder="Descrição do artigo ou serviço"
+                                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 bg-white dark:bg-slate-900"
+                                />
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={line.customUnitPrice || ''}
+                                  onChange={(e) => {
+                                    const copy = [...lineItems];
+                                    copy[idx].customUnitPrice = Number(e.target.value) || 0;
+                                    setLineItems(copy);
+                                  }}
+                                  placeholder="Preço Unitário (Kz)"
+                                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 font-mono bg-white dark:bg-slate-900"
+                                />
+                              </div>
+                            )}
                           </div>
 
                           <div className="sm:col-span-2 flex items-center gap-1.5">
@@ -2664,12 +2348,9 @@ export default function App() {
                               type="number"
                               min={0}
                               max={100}
-                              value={applyBlackFriday60 ? BLACK_FRIDAY_DISCOUNT_PERCENT : line.discountPercent}
+                              value={line.discountPercent}
                               onChange={(e) => {
                                 const val = Number(e.target.value) || 0;
-                                if (applyBlackFriday60 && val !== BLACK_FRIDAY_DISCOUNT_PERCENT) {
-                                  setApplyBlackFriday60(false);
-                                }
                                 const copy = [...lineItems];
                                 copy[idx].discountPercent = val;
                                 setLineItems(copy);
@@ -2721,11 +2402,6 @@ export default function App() {
                       <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-semibold">
                         Retenção na Fonte: {invoiceDraftTotals.withholdingTaxRate}% (Imposto Industrial)
                       </span>
-                      {invoiceDraftTotals.blackFridayApplied && (
-                        <span className="px-2 py-0.5 rounded bg-rose-600 text-white font-bold">
-                          PROMOÇÃO BLACK FRIDAY -{BLACK_FRIDAY_DISCOUNT_PERCENT}% INCLUÍDA
-                        </span>
-                      )}
                     </div>
                   </div>
 
@@ -2734,12 +2410,8 @@ export default function App() {
                       <span>Incidência Tributável (Líquido):</span>
                       <span className="font-mono">{formatKz(invoiceDraftTotals.subtotal)}</span>
                     </div>
-                    <div className="flex justify-between text-rose-400 font-semibold">
-                      <span>
-                        {invoiceDraftTotals.blackFridayApplied
-                          ? `Promoção Black Friday (${BLACK_FRIDAY_DISCOUNT_PERCENT}%):`
-                          : 'Total Descontos Comerciais:'}
-                      </span>
+                    <div className="flex justify-between text-slate-300 font-semibold">
+                      <span>Total Descontos Comerciais:</span>
                       <span className="font-mono">
                         - {formatKz(invoiceDraftTotals.discountTotal)}
                       </span>
@@ -2834,11 +2506,6 @@ export default function App() {
                                 <p className="font-mono font-bold text-sky-700 dark:text-sky-400">
                                   {inv.docNumber}
                                 </p>
-                                {fiscal.blackFridayApplied && (
-                                  <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[9px] font-bold">
-                                    BF -60%
-                                  </span>
-                                )}
                               </div>
                               <p className="text-slate-500">{inv.docType}</p>
                             </td>
@@ -3650,9 +3317,6 @@ export default function App() {
         onClose={() => setPreviewInvoice(null)}
         onIncrementPrintCount={handleIncrementPrintCount}
       />
-
-      {/* Hostinger VPS, Security & API Documentation Modal */}
-      <DocumentationModal isOpen={isDocsOpen} onClose={() => setIsDocsOpen(false)} />
 
       {/* PWA Offline Indicator & Sync Queue Status */}
       <OfflineIndicator pendingSyncCount={offlineQueueCount} />

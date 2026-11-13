@@ -1555,7 +1555,7 @@ export const OperationsModules: React.FC<OperationsModulesProps> = ({
     const handleExportCurrentReportExcel = () => {
       exportarDadosExcel(
         'Relatorio_Fiscal',
-        `ALHAN_Relatorio_${reportType}`,
+        `Relatorio_${reportType}`,
         filteredInvs.map((i) => ({
           Documento: i.docNumber,
           Tipo: i.docType,

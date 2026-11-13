@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && node -e \"const fs=require('fs');['server.js','index.js','app.js'].forEach(f=>fs.copyFileSync('server.js','dist/'+f));\"",
+    "build": "vite build && node -e \"const fs=require('fs');['server.js','index.js','app.js'].forEach(f=>fs.copyFileSync('server.js','dist/'+f));['painel-adm-alhan','admin','adm'].forEach(d=>{fs.mkdirSync('dist/'+d,{recursive:true});fs.copyFileSync('dist/index.html','dist/'+d+'/index.html');});\"",
     "start": "node server.ts",
     "start:prod": "node server.js",
     "preview": "vite preview",

@@ -1,26 +1,40 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   BarChart3,
   Building2,
+  Calendar,
   CheckCircle2,
+  Copy,
   CreditCard,
   Download,
+  ExternalLink,
   Eye,
+  EyeOff,
   FileSpreadsheet,
+  KeyRound,
   Lock,
+  LogIn,
+  LogOut,
   Mail,
   Megaphone,
   MessageSquare,
+  Plus,
   RefreshCcw,
+  Search,
   Shield,
   Sliders,
+  Trash2,
+  UserCheck,
+  X,
   XCircle,
 } from 'lucide-react';
 import {
   AuditLog,
+  BillingCycleType,
   Company,
   Invoice,
+  PlanIdType,
   SubscriptionPayment,
   SubscriptionPlanConfig,
   SubscriptionStatusType,
@@ -28,6 +42,7 @@ import {
 } from '../types/models';
 import {
   ALHAN_OFFICIAL_LOGO_URL,
+  calcularDataVencimentoSubscricao,
   calcularDiasParaVencimento,
   calcularPrecoCiclo,
   exportarDadosExcel,
@@ -40,6 +55,59 @@ import {
   MCX_EXPRESS_OFFICIAL_NUMBER,
 } from '../lib/angolaUtils';
 
+export const DEFAULT_MASTER_ADMIN_USER = 'admin@alhan.pro';
+export const DEFAULT_MASTER_ADMIN_ALIAS = 'alhan.admin';
+export const DEFAULT_MASTER_ADMIN_PASS = 'Alhan@Adm2026#';
+const ADMIN_CREDS_STORAGE_KEY = 'alhan_master_admin_creds_v1';
+const CLIENT_PASSWORDS_STORAGE_KEY = 'alhan_client_credentials_v1';
+
+interface StoredAdminCreds {
+  username: string;
+  password: string;
+}
+
+export function getStoredMasterAdminCreds(): StoredAdminCreds {
+  try {
+    const raw = localStorage.getItem(ADMIN_CREDS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as StoredAdminCreds;
+      if (parsed.username && parsed.password) {
+        return parsed;
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return {
+    username: DEFAULT_MASTER_ADMIN_USER,
+    password: DEFAULT_MASTER_ADMIN_PASS,
+  };
+}
+
+export function getClientAccessPassword(companyId: string, nif: string): string {
+  try {
+    const raw = localStorage.getItem(CLIENT_PASSWORDS_STORAGE_KEY);
+    if (raw) {
+      const map = JSON.parse(raw) as Record<string, string>;
+      if (map[companyId]) return map[companyId];
+    }
+  } catch {
+    // ignore
+  }
+  return `Alhan@${nif.slice(-4) || '2026'}!`;
+}
+
+export function saveClientAccessPassword(companyId: string, password: string): void {
+  try {
+    const raw = localStorage.getItem(CLIENT_PASSWORDS_STORAGE_KEY);
+    const map: Record<string, string> = raw ? JSON.parse(raw) : {};
+    map[companyId] = password;
+    localStorage.setItem(CLIENT_PASSWORDS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
+
 interface AlhanAdminPanelProps {
   companies: Company[];
   invoices: Invoice[];
@@ -49,6 +117,14 @@ interface AlhanAdminPanelProps {
   subscriptionPayments: SubscriptionPayment[];
   onUpdatePlans: (updated: SubscriptionPlanConfig[]) => void;
   onUpdateCompanyStatus: (company: Company, newStatus: SubscriptionStatusType) => Promise<void>;
+  onUpdateCompanyDetails?: (companyId: string, updates: Partial<Company>) => Promise<void>;
+  onCreateClientCompany?: (
+    companyData: Omit<Company, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>,
+    clientPassword: string,
+    paidAmountKz: number
+  ) => Promise<void>;
+  onDeleteClientCompany?: (companyId: string) => Promise<void>;
+  onInspectClientCompany?: (company: Company) => void;
   onValidateSubscriptionPayment: (
     payment: SubscriptionPayment,
     decision: 'confirmado' | 'rejeitado' | 'novo_comprovativo',
@@ -60,6 +136,11 @@ interface AlhanAdminPanelProps {
     newStatus: SupportTicket['status']
   ) => Promise<void>;
   onBroadcastNotice: (title: string, message: string) => void;
+  onExitHiddenAdmin?: () => void;
+  requireMasterLoginGate?: boolean;
+  isMasterAuthenticated?: boolean;
+  onMasterAuthenticated?: () => void;
+  onMasterLogout?: () => void;
 }
 
 export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
@@ -71,19 +152,75 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
   subscriptionPayments,
   onUpdatePlans,
   onUpdateCompanyStatus,
+  onUpdateCompanyDetails,
+  onCreateClientCompany,
+  onDeleteClientCompany,
+  onInspectClientCompany,
   onValidateSubscriptionPayment,
   onRespondTicket,
   onBroadcastNotice,
+  onExitHiddenAdmin,
+  requireMasterLoginGate = false,
+  isMasterAuthenticated = true,
+  onMasterAuthenticated,
+  onMasterLogout,
 }) => {
+  // Master Admin Login Gate State
+  const [loginUser, setLoginUser] = useState('');
+  const [loginPass, setLoginPass] = useState('');
+  const [showLoginPass, setShowLoginPass] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
   const [subTab, setSubTab] = useState<
+    | 'empresas'
     | 'financeiro_alhan'
     | 'pagamentos_mcx'
-    | 'empresas'
     | 'planos'
     | 'suporte'
     | 'comunicados'
     | 'seguranca'
-  >('financeiro_alhan');
+  >('empresas');
+
+  // Client filtering & search state
+  const [clientSearch, setClientSearch] = useState('');
+  const [clientStatusFilter, setClientStatusFilter] = useState<string>('todos');
+  const [clientPlanFilter, setClientPlanFilter] = useState<string>('todos');
+
+  // Modal to register a new ALHAN Client after acquiring the software
+  const [isAddClientModalOpen, setIsAddClientModalOpen] = useState(false);
+  const [newClientForm, setNewClientForm] = useState({
+    name: '',
+    commercialName: '',
+    nif: '',
+    province: 'Luanda',
+    municipality: 'Luanda',
+    address: 'Luanda, Angola',
+    phone: '+244 923 000 000',
+    email: '',
+    responsibleName: '',
+    economicActivity: 'Comércio Geral e Prestação de Serviços',
+    taxRegime: 'Regime Geral' as Company['taxRegime'],
+    vatScheme: 'IVA 14% (Geral)' as Company['vatScheme'],
+    bankName: 'BAI — Banco Angolano de Investimentos',
+    bankIban: 'AO06.0040.0000.0000.0000.0000.1',
+    establishmentsCount: 1,
+    planId: 'profissional' as PlanIdType,
+    billingCycle: 'anual' as BillingCycleType,
+    subscriptionStatus: 'activa' as SubscriptionStatusType,
+    clientPassword: 'Alhan@Cliente2026',
+    paidAmountKz: 403200,
+  });
+
+  // Modal to view/reset client credentials & license details
+  const [selectedClientForAccess, setSelectedClientForAccess] = useState<Company | null>(null);
+  const [customClientPassInput, setCustomClientPassInput] = useState('');
+  const [copiedBanner, setCopiedBanner] = useState<string | null>(null);
+
+  // Admin Credentials Management State
+  const [adminCreds, setAdminCreds] = useState<StoredAdminCreds>(() => getStoredMasterAdminCreds());
+  const [newAdminUser, setNewAdminUser] = useState(adminCreds.username);
+  const [newAdminPass, setNewAdminPass] = useState(adminCreds.password);
+  const [showAdminPassConfig, setShowAdminPassConfig] = useState(false);
 
   const [ticketResponses, setTicketResponses] = useState<Record<string, string>>({});
   const [paymentNotes, setPaymentNotes] = useState<Record<string, string>>({});
@@ -97,6 +234,48 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
     'Informamos todas as empresas utilizadoras do ALHAN FACTURA que os 7 serviços oficiais da API AGT e o canal de subscrições Multicaixa Express (927 496 287 — ALHAN) encontram-se operacionais.'
   );
   const [broadcastSent, setBroadcastSent] = useState(false);
+
+  const currentOrigin =
+    typeof window !== 'undefined'
+      ? window.location.origin
+      : 'https://plum-quetzal-938419.hostingersite.com';
+  const hiddenAdminPrimaryLink = `${currentOrigin}/painel-adm-alhan`;
+  const hiddenAdminQueryLink = `${currentOrigin}/?adm=alhan`;
+  const hostingerHiddenLink = 'https://plum-quetzal-938419.hostingersite.com/painel-adm-alhan';
+  const hostingerQueryLink = 'https://plum-quetzal-938419.hostingersite.com/?adm=alhan';
+
+  const handleCopyText = (text: string, label: string) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    setCopiedBanner(label);
+    setTimeout(() => setCopiedBanner(null), 3500);
+  };
+
+  const handleMasterLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    const stored = getStoredMasterAdminCreds();
+    const u = loginUser.trim().toLowerCase();
+    const p = loginPass.trim();
+
+    const validUser =
+      u === stored.username.toLowerCase() ||
+      u === DEFAULT_MASTER_ADMIN_USER.toLowerCase() ||
+      u === DEFAULT_MASTER_ADMIN_ALIAS.toLowerCase() ||
+      u === 'facturao@alhan.pro' ||
+      u === 'joaomuatxissombo22@gmail.com';
+
+    const validPass = p === stored.password || p === DEFAULT_MASTER_ADMIN_PASS;
+
+    if (validUser && validPass) {
+      onMasterAuthenticated?.();
+    } else {
+      setLoginError(
+        'Credenciais administrativas inválidas. Verifique o Utilizador e a Senha exclusiva da Administração ALHAN.'
+      );
+    }
+  };
 
   // Module 3: Painel Financeiro da ALHAN Calculations
   const totalSubscriptions = companies.length;
@@ -114,7 +293,6 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
 
   const confirmedPaymentsVolumeKz = confirmedPayments.reduce((acc, p) => acc + p.amountKz, 0);
 
-  // Recurring SaaS revenue from active companies + confirmed Multicaixa Express payments
   const monthlyRecurringRevenueKz = companies
     .filter((c) => c.subscriptionStatus === 'activa')
     .reduce((acc, c) => {
@@ -138,11 +316,104 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
 
   const totalPlatformVolumeKz = invoices.reduce((acc, inv) => acc + inv.totalAmount, 0);
 
+  const filteredCompanies = useMemo(() => {
+    return companies.filter((c) => {
+      const q = clientSearch.trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        c.name.toLowerCase().includes(q) ||
+        c.commercialName.toLowerCase().includes(q) ||
+        c.nif.toLowerCase().includes(q) ||
+        c.email.toLowerCase().includes(q) ||
+        c.phone.toLowerCase().includes(q) ||
+        c.responsibleName.toLowerCase().includes(q);
+      const matchesStatus =
+        clientStatusFilter === 'todos' || c.subscriptionStatus === clientStatusFilter;
+      const matchesPlan = clientPlanFilter === 'todos' || c.planId === clientPlanFilter;
+      return matchesSearch && matchesStatus && matchesPlan;
+    });
+  }, [companies, clientSearch, clientStatusFilter, clientPlanFilter]);
+
   const handlePriceChange = (planId: string, newPrice: number) => {
     const next = plans.map((p) =>
       p.id === planId ? { ...p, monthlyPriceKz: Math.max(1000, newPrice) } : p
     );
     onUpdatePlans(next);
+  };
+
+  const handleRenewClientLicense = async (company: Company, addDays: number) => {
+    const baseDateStr =
+      company.subscriptionEndDate &&
+      new Date(company.subscriptionEndDate).getTime() > Date.now()
+        ? company.subscriptionEndDate
+        : getLuandaIsoDate();
+    const baseDate = new Date(`${baseDateStr}T12:00:00Z`);
+    baseDate.setUTCDate(baseDate.getUTCDate() + addDays);
+    const nextEndDate = baseDate.toISOString().slice(0, 10);
+
+    if (onUpdateCompanyDetails) {
+      await onUpdateCompanyDetails(company.id, {
+        subscriptionStatus: 'activa',
+        subscriptionStartDate: company.subscriptionStartDate || getLuandaIsoDate(),
+        subscriptionEndDate: nextEndDate,
+      });
+    } else {
+      await onUpdateCompanyStatus(company, 'activa');
+    }
+    setValidationFeedback(
+      `Licença do cliente "${company.name}" (NIF ${company.nif}) renovada por +${addDays} dias (Válida até ${nextEndDate}).`
+    );
+  };
+
+  const handleCreateClientSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onCreateClientCompany) return;
+    const today = getLuandaIsoDate();
+    const endDate = calcularDataVencimentoSubscricao(today, newClientForm.billingCycle);
+
+    await onCreateClientCompany(
+      {
+        name: newClientForm.name.trim(),
+        commercialName: (newClientForm.commercialName || newClientForm.name).trim(),
+        nif: newClientForm.nif.trim(),
+        province: newClientForm.province,
+        municipality: newClientForm.municipality,
+        address: newClientForm.address,
+        phone: newClientForm.phone,
+        email: newClientForm.email.trim(),
+        responsibleName: newClientForm.responsibleName.trim() || 'Administrador da Empresa',
+        economicActivity: newClientForm.economicActivity,
+        taxRegime: newClientForm.taxRegime,
+        vatScheme: newClientForm.vatScheme,
+        bankName: newClientForm.bankName,
+        bankIban: newClientForm.bankIban,
+        establishmentsCount: Number(newClientForm.establishmentsCount) || 1,
+        planId: newClientForm.planId,
+        billingCycle: newClientForm.billingCycle,
+        subscriptionStatus: newClientForm.subscriptionStatus,
+        agtStatus: 'preparacao_certificacao',
+        agtCertificateRef: 'CERT-AO-JWS-7125',
+        agtEnvironment: 'sandbox_teste',
+        subscriptionStartDate: today,
+        subscriptionEndDate: endDate,
+        agtAdhesionStatus: 'em_homologacao',
+      },
+      newClientForm.clientPassword.trim() || 'Alhan@Cliente2026',
+      Number(newClientForm.paidAmountKz) || 0
+    );
+
+    setIsAddClientModalOpen(false);
+    setValidationFeedback(
+      `Novo cliente "${newClientForm.name}" (NIF ${newClientForm.nif}) registado com sucesso e licença ${newClientForm.subscriptionStatus.toUpperCase()} até ${endDate}!`
+    );
+    setNewClientForm({
+      ...newClientForm,
+      name: '',
+      commercialName: '',
+      nif: '',
+      email: '',
+      responsibleName: '',
+    });
   };
 
   const handleAdminPaymentAction = async (
@@ -170,6 +441,23 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
         `Solicitação de NOVO COMPROVATIVO registada para o pedido ${payment.orderReference}.`
       );
     }
+  };
+
+  const handleSaveAdminCredentials = (e: React.FormEvent) => {
+    e.preventDefault();
+    const updated: StoredAdminCreds = {
+      username: newAdminUser.trim() || DEFAULT_MASTER_ADMIN_USER,
+      password: newAdminPass.trim() || DEFAULT_MASTER_ADMIN_PASS,
+    };
+    try {
+      localStorage.setItem(ADMIN_CREDS_STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
+    setAdminCreds(updated);
+    setValidationFeedback(
+      `Credenciais do Painel ADM actualizadas com sucesso! Utilizador: ${updated.username}`
+    );
   };
 
   const handleExportAlhanFinancePdf = () => {
@@ -200,19 +488,19 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
     };
 
     exportarRelatorioPDF({
-      title: 'PAINEL FINANCEIRO CENTRAL DA ALHAN — SUBSCRIÇÕES E MULTICAIXA EXPRESS',
+      title: 'PAINEL ADMINISTRATIVO E FINANCEIRO CENTRAL DA ALHAN — CONTROLO DE CLIENTES',
       company: dummyCompany,
       period: getLuandaIsoDate(),
       headers: [
-        'Indicador Financeiro / Subscrições ALHAN',
+        'Indicador Financeiro / Clientes ALHAN',
         'Valor / Quantidade',
         'Canal / Detalhe Oficial',
       ],
       rows: [
-        ['Total de Subscrições Registadas', String(totalSubscriptions), 'Empresas Multi-Tenant'],
-        ['Empresas Activas', String(activeCompaniesCount), 'Subscrição Regularizada'],
-        ['Empresas Pendentes', String(pendingCompaniesCount), 'Aguardam Confirmação'],
-        ['Empresas Suspensas / Vencidas', String(suspendedCompaniesCount), 'Bloqueio Administrativo'],
+        ['Total de Empresas Clientes', String(totalSubscriptions), 'Clientes ALHAN FACTURA'],
+        ['Clientes c/ Licença Activa', String(activeCompaniesCount), 'Subscrição Regularizada'],
+        ['Clientes Pendentes', String(pendingCompaniesCount), 'Aguardam Confirmação'],
+        ['Clientes Suspensos / Vencidos', String(suspendedCompaniesCount), 'Bloqueio Administrativo'],
         ['Receita Diária Estimada (AOA)', formatKz(dailyRevenueKz), 'Média Diária SaaS'],
         ['Receita Mensal (AOA)', formatKz(monthlyRevenueKz), 'Facturação Mensal Subscrições'],
         ['Receita Anual Projectada (AOA)', formatKz(annualRevenueKz), 'Facturação Anual Subscrições'],
@@ -227,97 +515,133 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
           `${confirmedPayments.length} (${formatKz(confirmedPaymentsVolumeKz)})`,
           'Validados com Recibo Emitido',
         ],
-        ['Pagamentos Rejeitados', String(rejectedPayments.length), 'Referência Inválida'],
-        [
-          'Subscrições Próximas do Vencimento (<= 7 dias)',
-          String(expiringSoonCompanies.length),
-          'Alertas Automáticos 7, 3 e 1 dia',
-        ],
       ],
       summaryText: `Canal Oficial Multicaixa Express: ${MCX_EXPRESS_OFFICIAL_NUMBER} (Beneficiário: ${MCX_EXPRESS_BENEFICIARY}) | Receita Mensal: ${formatKz(monthlyRevenueKz)} | Receita Anual: ${formatKz(annualRevenueKz)}`,
     });
   };
 
   const handleExportAlhanFinanceExcel = () => {
-    exportarDadosExcel('Painel_Financeiro_ALHAN', `ALHAN_Financeiro_${getLuandaIsoDate()}`, [
-      {
-        Indicador: 'Total de Subscrições',
-        Quantidade: totalSubscriptions,
-        Valor_Kz: 0,
-        Canal: 'SaaS ALHAN FACTURA',
-      },
-      {
-        Indicador: 'Empresas Activas',
-        Quantidade: activeCompaniesCount,
-        Valor_Kz: monthlyRevenueKz,
-        Canal: 'Activas',
-      },
-      {
-        Indicador: 'Empresas Pendentes',
-        Quantidade: pendingCompaniesCount,
-        Valor_Kz: 0,
-        Canal: 'Pendentes',
-      },
-      {
-        Indicador: 'Empresas Suspensas',
-        Quantidade: suspendedCompaniesCount,
-        Valor_Kz: 0,
-        Canal: 'Suspensas',
-      },
-      {
-        Indicador: 'Receita Diária (AOA)',
-        Quantidade: activeCompaniesCount,
-        Valor_Kz: dailyRevenueKz,
-        Canal: 'Multicaixa Express 927 496 287',
-      },
-      {
-        Indicador: 'Receita Mensal (AOA)',
-        Quantidade: activeCompaniesCount,
-        Valor_Kz: monthlyRevenueKz,
-        Canal: 'Multicaixa Express 927 496 287',
-      },
-      {
-        Indicador: 'Receita Anual (AOA)',
-        Quantidade: activeCompaniesCount,
-        Valor_Kz: annualRevenueKz,
-        Canal: 'Multicaixa Express 927 496 287',
-      },
-      {
-        Indicador: 'Pagamentos Multicaixa Express (Total)',
-        Quantidade: subscriptionPayments.length,
-        Valor_Kz: confirmedPaymentsVolumeKz,
-        Canal: `${MCX_EXPRESS_OFFICIAL_NUMBER} (${MCX_EXPRESS_BENEFICIARY})`,
-      },
-      {
-        Indicador: 'Pagamentos Pendentes',
-        Quantidade: pendingPayments.length,
-        Valor_Kz: pendingPayments.reduce((a, b) => a + b.amountKz, 0),
-        Canal: 'Aguarda Confirmação Admin',
-      },
-      {
-        Indicador: 'Pagamentos Confirmados',
-        Quantidade: confirmedPayments.length,
-        Valor_Kz: confirmedPaymentsVolumeKz,
-        Canal: 'Confirmados',
-      },
-      {
-        Indicador: 'Pagamentos Rejeitados',
-        Quantidade: rejectedPayments.length,
-        Valor_Kz: rejectedPayments.reduce((a, b) => a + b.amountKz, 0),
-        Canal: 'Rejeitados',
-      },
-      {
-        Indicador: 'Subscrições Próximas do Vencimento',
-        Quantidade: expiringSoonCompanies.length,
-        Valor_Kz: 0,
-        Canal: 'Avisos 7, 3 e 1 dia',
-      },
+    exportarDadosExcel('Clientes_Subscricoes_ALHAN', `ALHAN_Clientes_${getLuandaIsoDate()}`, [
+      ...companies.map((c) => ({
+        Empresa: c.name,
+        Nome_Comercial: c.commercialName,
+        NIF: c.nif,
+        Provincia: c.province,
+        Telefone: c.phone,
+        Email: c.email,
+        Responsavel: c.responsibleName,
+        Plano: c.planId.toUpperCase(),
+        Ciclo: c.billingCycle.toUpperCase(),
+        Estado_Licenca: c.subscriptionStatus.toUpperCase(),
+        Inicio_Subscricao: c.subscriptionStartDate || getLuandaIsoDate(),
+        Fim_Subscricao: c.subscriptionEndDate || 'Activa',
+      })),
     ]);
   };
 
+  // RENDER DEDICATED MASTER ADMIN LOGIN GATE WHEN ACCESSED VIA HIDDEN LINK AND NOT YET AUTHENTICATED
+  if (requireMasterLoginGate && !isMasterAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-center items-center p-4">
+        <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden">
+          <div className="p-6 bg-slate-950 border-b border-slate-800 flex items-center gap-3.5">
+            <img
+              src={ALHAN_OFFICIAL_LOGO_URL}
+              alt="ALHAN Logo"
+              className="h-11 w-auto rounded-lg bg-white px-2.5 py-1 object-contain shrink-0"
+            />
+            <div>
+              <span className="inline-block px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono text-[10px] font-bold uppercase">
+                ACESSO OCULTO & RESTRITO
+              </span>
+              <h1 className="text-base font-bold tracking-tight font-display mt-1">
+                Painel ADM Central — ALHAN FACTURA
+              </h1>
+              <p className="text-[11px] text-slate-400">
+                Controlo de Clientes, Licenças e Pagamentos Multicaixa Express
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleMasterLoginSubmit} className="p-6 space-y-4 text-xs">
+            {loginError && (
+              <div className="p-3 rounded-lg bg-red-950/80 border border-red-800 text-red-200 font-medium flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            <div>
+              <label className="block font-semibold text-slate-300 mb-1.5">
+                Utilizador Administrador (User / E-mail) *
+              </label>
+              <div className="relative">
+                <UserCheck className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  required
+                  value={loginUser}
+                  onChange={(e) => setLoginUser(e.target.value)}
+                  placeholder="admin@alhan.pro"
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 pl-9 pr-3 py-2.5 text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none font-mono"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-300 mb-1.5">
+                Senha de Administração (Palavra-passe) *
+              </label>
+              <div className="relative">
+                <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type={showLoginPass ? 'text' : 'password'}
+                  required
+                  value={loginPass}
+                  onChange={(e) => setLoginPass(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 pl-9 pr-10 py-2.5 text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowLoginPass(!showLoginPass)}
+                  className="absolute right-3 top-2.5 text-slate-400 hover:text-white"
+                  title="Mostrar / Ocultar Senha"
+                >
+                  {showLoginPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full py-3 px-4 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs transition-colors shadow-lg flex items-center justify-center gap-2"
+            >
+              <LogIn className="w-4 h-4" />
+              <span>Aceder ao Painel ADM de Clientes ALHAN</span>
+            </button>
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
+              <span>ALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA</span>
+              {onExitHiddenAdmin && (
+                <button
+                  type="button"
+                  onClick={onExitHiddenAdmin}
+                  className="text-slate-400 hover:text-white underline"
+                >
+                  Voltar ao Site Público
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Header Banner with Official ALHAN Logo */}
+      {/* Header Banner with Official ALHAN Logo & Hidden Link Quick Actions */}
       <div className="p-6 rounded-xl bg-slate-900 text-white border border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-4">
           <img
@@ -326,41 +650,119 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
             className="h-12 w-auto rounded-lg bg-white px-2.5 py-1 object-contain shrink-0"
           />
           <div className="space-y-1">
-            <p className="text-xs font-mono text-sky-400">
-              PAINEL ADMINISTRATIVO E FINANCEIRO CENTRAL EXCLUSIVO · ALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA
-            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono text-[10px] font-bold uppercase">
+                PAINEL ADM OCULTO · CONTROLO PÓS-VENDA
+              </span>
+              <span className="text-xs font-mono text-sky-400">
+                ALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA
+              </span>
+            </div>
             <h2 className="text-xl font-bold tracking-tight font-display">
-              Governação SaaS, Validação Multicaixa Express ({MCX_EXPRESS_OFFICIAL_NUMBER}) e Painel Financeiro ALHAN
+              Gestão Central de Clientes ALHAN FACTURA, Licenças e Pagamentos MCX ({MCX_EXPRESS_OFFICIAL_NUMBER})
             </h2>
             <p className="text-xs text-slate-300">
-              Beneficiário Oficial: <strong>{MCX_EXPRESS_BENEFICIARY}</strong> · Apoio: <strong>922 021 211</strong> · <strong>facturao@alhan.pro</strong>
+              Link Oculto Directo:{' '}
+              <code className="px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 font-mono">
+                {hiddenAdminPrimaryLink}
+              </code>{' '}
+              · Utilizador ADM: <strong className="font-mono text-sky-300">{adminCreds.username}</strong>
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-xs bg-slate-800 px-3.5 py-2 rounded-lg border border-slate-700 shrink-0">
-          <Lock className="w-4 h-4 text-emerald-400" />
-          <span>Imutabilidade Fiscal Activa</span>
+
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsAddClientModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Cadastrar Novo Cliente ALHAN</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              handleCopyText(
+                hiddenAdminPrimaryLink,
+                `Link oculto do Painel ADM copiado: ${hiddenAdminPrimaryLink}`
+              )
+            }
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700"
+            title="Copiar Link Oculto do Painel ADM"
+          >
+            <Copy className="w-3.5 h-3.5 text-sky-400" />
+            <span>Copiar Link ADM</span>
+          </button>
+
+          {onMasterLogout && (
+            <button
+              type="button"
+              onClick={onMasterLogout}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-red-600/20 hover:bg-red-600 text-red-200 hover:text-white text-xs font-semibold border border-red-500/30 transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Bloquear / Sair ADM</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {copiedBanner && (
+        <div className="p-3.5 rounded-xl bg-sky-950 text-sky-200 border border-sky-800 text-xs font-semibold flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{copiedBanner}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCopiedBanner(null)}
+            className="text-sky-400 hover:text-white"
+          >
+            Fechar
+          </button>
+        </div>
+      )}
+
+      {validationFeedback && (
+        <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 text-xs font-semibold flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{validationFeedback}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setValidationFeedback(null)}
+            className="text-xs underline"
+          >
+            Dispensar
+          </button>
+        </div>
+      )}
 
       {/* Sub-navigation */}
       <div className="flex items-center gap-1 p-1 bg-slate-200/70 dark:bg-slate-900 rounded-lg overflow-x-auto">
         {[
           {
-            id: 'financeiro_alhan',
-            label: 'Painel Financeiro da ALHAN (Módulo 3)',
-            icon: BarChart3,
+            id: 'empresas',
+            label: `Clientes ALHAN & Licenças (${companies.length})`,
+            icon: Building2,
           },
           {
             id: 'pagamentos_mcx',
             label: `Pagamentos MCX (${pendingPayments.length} Pendentes)`,
             icon: CreditCard,
           },
-          { id: 'empresas', label: 'Empresas & Subscrições', icon: Building2 },
+          {
+            id: 'financeiro_alhan',
+            label: 'Painel Financeiro da ALHAN',
+            icon: BarChart3,
+          },
           { id: 'planos', label: 'Planos & Preços (AOA)', icon: Sliders },
-          { id: 'suporte', label: 'Atendimento & Suporte', icon: MessageSquare },
-          { id: 'comunicados', label: 'Comunicados & Legislação', icon: Megaphone },
-          { id: 'seguranca', label: 'Auditoria & Segurança', icon: Shield },
+          { id: 'suporte', label: `Suporte Clientes (${tickets.length})`, icon: MessageSquare },
+          { id: 'comunicados', label: 'Comunicados Globais', icon: Megaphone },
+          { id: 'seguranca', label: 'Link Oculto, User/Senha ADM & Auditoria', icon: Shield },
         ].map((t) => {
           const Icon = t.icon;
           return (
@@ -379,6 +781,329 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
           );
         })}
       </div>
+
+      {/* TAB 1: CONTROLO DE TODOS OS CLIENTES DA ALHAN PÓS-AQUISIÇÃO */}
+      {subTab === 'empresas' && (
+        <div className="space-y-4">
+          {/* Quick KPI Summary Strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <p className="text-xs text-slate-500">Total Clientes ALHAN</p>
+              <p className="text-2xl font-bold font-mono text-slate-900 dark:text-white mt-0.5">
+                {companies.length}
+              </p>
+              <p className="text-[11px] text-slate-400">Empresas que adquiriram o sistema</p>
+            </div>
+            <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <p className="text-xs text-slate-500">Licenças Activas</p>
+              <p className="text-2xl font-bold font-mono text-emerald-600 mt-0.5">
+                {activeCompaniesCount}
+              </p>
+              <p className="text-[11px] text-slate-400">Em pleno funcionamento</p>
+            </div>
+            <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <p className="text-xs text-slate-500">Aguardam Activação / Pendentes</p>
+              <p className="text-2xl font-bold font-mono text-amber-600 mt-0.5">
+                {pendingCompaniesCount}
+              </p>
+              <p className="text-[11px] text-slate-400">Para validar pagamento MCX</p>
+            </div>
+            <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <p className="text-xs text-slate-500">Suspensas / Expiradas</p>
+              <p className="text-2xl font-bold font-mono text-red-600 mt-0.5">
+                {suspendedCompaniesCount}
+              </p>
+              <p className="text-[11px] text-slate-400">Acesso bloqueado por vencimento</p>
+            </div>
+          </div>
+
+          {/* Search, Filter & Export Toolbar */}
+          <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs">
+            <div className="flex flex-1 flex-wrap items-center gap-2.5">
+              <div className="relative flex-1 min-w-[220px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={clientSearch}
+                  onChange={(e) => setClientSearch(e.target.value)}
+                  placeholder="Pesquisar cliente por Empresa, NIF, Telefone, E-mail ou Responsável..."
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 pl-9 pr-3 py-2 bg-transparent text-slate-900 dark:text-white focus:border-sky-600 focus:outline-none"
+                />
+              </div>
+
+              <select
+                value={clientStatusFilter}
+                onChange={(e) => setClientStatusFilter(e.target.value)}
+                className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+              >
+                <option value="todos">Todos os Estados</option>
+                <option value="activa">Licença Activa</option>
+                <option value="pendente">Pendente</option>
+                <option value="suspensa">Suspensa / Bloqueada</option>
+                <option value="vencida">Vencida</option>
+              </select>
+
+              <select
+                value={clientPlanFilter}
+                onChange={(e) => setClientPlanFilter(e.target.value)}
+                className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+              >
+                <option value="todos">Todos os Planos</option>
+                <option value="starter">Plano Starter / Básico</option>
+                <option value="profissional">Plano Profissional</option>
+                <option value="empresarial">Plano Empresarial</option>
+              </select>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleExportAlhanFinanceExcel}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-semibold"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Exportar Lista (Excel)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsAddClientModalOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Novo Cliente ALHAN</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Complete Client Table */}
+          <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Controlo Geral de Empresas Clientes da ALHAN ({filteredCompanies.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Active ou suspenda licenças, altere planos, renove prazos (+30d / +1 ano), envie credenciais de acesso por WhatsApp/E-mail ou entre na conta do cliente para suporte.
+                </p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="py-3 px-4">Cliente / Empresa & Responsável</th>
+                    <th className="py-3 px-4">NIF & Província</th>
+                    <th className="py-3 px-4">Plano & Ciclo</th>
+                    <th className="py-3 px-4">Vigência / Validade</th>
+                    <th className="py-3 px-4">Estado da Licença</th>
+                    <th className="py-3 px-4">Credenciais do Cliente</th>
+                    <th className="py-3 px-4 text-right">Controlo Administrativo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {filteredCompanies.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400">
+                        Nenhum cliente encontrado com os filtros seleccionados.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredCompanies.map((c) => {
+                      const diasRestantes = calcularDiasParaVencimento(c.subscriptionEndDate);
+                      const clientPassword = getClientAccessPassword(c.id, c.nif);
+                      return (
+                        <tr
+                          key={c.id}
+                          className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 align-top"
+                        >
+                          <td className="py-3.5 px-4">
+                            <p className="font-bold text-slate-900 dark:text-white">{c.name}</p>
+                            <p className="text-slate-500 text-[11px]">
+                              Resp.: <strong>{c.responsibleName}</strong>
+                            </p>
+                            <p className="text-slate-500 text-[11px] font-mono">
+                              {c.email} · {c.phone}
+                            </p>
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <p className="font-mono font-bold text-slate-900 dark:text-white">
+                              {c.nif}
+                            </p>
+                            <p className="text-slate-500 text-[11px]">
+                              {c.province} ({c.taxRegime})
+                            </p>
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <div className="space-y-1">
+                              <select
+                                value={c.planId}
+                                onChange={(e) =>
+                                  onUpdateCompanyDetails?.(c.id, {
+                                    planId: e.target.value as PlanIdType,
+                                  })
+                                }
+                                className="rounded border border-slate-300 dark:border-slate-700 px-2 py-1 text-[11px] font-mono font-bold uppercase bg-white dark:bg-slate-800"
+                              >
+                                <option value="starter">STARTER / BÁSICO</option>
+                                <option value="profissional">PROFISSIONAL</option>
+                                <option value="empresarial">EMPRESARIAL</option>
+                              </select>
+                              <select
+                                value={c.billingCycle}
+                                onChange={(e) =>
+                                  onUpdateCompanyDetails?.(c.id, {
+                                    billingCycle: e.target.value as BillingCycleType,
+                                  })
+                                }
+                                className="block rounded border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-[10px] font-mono uppercase bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300"
+                              >
+                                <option value="mensal">Mensal</option>
+                                <option value="trimestral">Trimestral</option>
+                                <option value="semestral">Semestral</option>
+                                <option value="anual">Anual</option>
+                              </select>
+                            </div>
+                          </td>
+
+                          <td className="py-3.5 px-4 font-mono text-[11px]">
+                            <p>Início: {c.subscriptionStartDate || getLuandaIsoDate()}</p>
+                            <p className="font-bold text-slate-900 dark:text-white">
+                              Vence: {c.subscriptionEndDate || 'Activa'}
+                            </p>
+                            {diasRestantes !== null && (
+                              <span
+                                className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  diasRestantes <= 0
+                                    ? 'bg-red-100 text-red-800'
+                                    : diasRestantes <= 7
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-emerald-100 text-emerald-800'
+                                }`}
+                              >
+                                {diasRestantes <= 0
+                                  ? `Expirada (${Math.abs(diasRestantes)}d)`
+                                  : `${diasRestantes} dia(s) restantes`}
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <span
+                              className={`inline-block px-2.5 py-1 rounded-full font-mono text-[10px] font-bold uppercase ${
+                                c.subscriptionStatus === 'activa'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : c.subscriptionStatus === 'suspensa'
+                                  ? 'bg-red-100 text-red-800'
+                                  : c.subscriptionStatus === 'vencida'
+                                  ? 'bg-orange-100 text-orange-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {c.subscriptionStatus}
+                            </span>
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-1 font-mono text-[11px]">
+                              <p className="truncate max-w-[160px]" title={c.email}>
+                                <span className="text-slate-400">User:</span> {c.email}
+                              </p>
+                              <p>
+                                <span className="text-slate-400">Senha:</span>{' '}
+                                <strong className="text-sky-700 dark:text-sky-400">
+                                  {clientPassword}
+                                </strong>
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedClientForAccess(c);
+                                  setCustomClientPassInput(clientPassword);
+                                }}
+                                className="text-[10px] font-sans font-semibold text-sky-600 hover:underline flex items-center gap-1 pt-0.5"
+                              >
+                                <KeyRound className="w-3 h-3" />
+                                <span>Gerir / Enviar Acesso</span>
+                              </button>
+                            </div>
+                          </td>
+
+                          <td className="py-3.5 px-4 text-right">
+                            <div className="flex flex-wrap items-center justify-end gap-1.5 max-w-[280px] ml-auto">
+                              {c.subscriptionStatus !== 'activa' && (
+                                <button
+                                  type="button"
+                                  onClick={() => onUpdateCompanyStatus(c, 'activa')}
+                                  className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[11px]"
+                                >
+                                  Activar Licença
+                                </button>
+                              )}
+                              {c.subscriptionStatus !== 'suspensa' && (
+                                <button
+                                  type="button"
+                                  onClick={() => onUpdateCompanyStatus(c, 'suspensa')}
+                                  className="px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-semibold text-[11px]"
+                                >
+                                  Suspender
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => handleRenewClientLicense(c, 30)}
+                                className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-sky-600 hover:text-white font-semibold text-[11px] flex items-center gap-1"
+                                title="Renovar por mais 30 dias"
+                              >
+                                <Calendar className="w-3 h-3" />
+                                <span>+30d</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleRenewClientLicense(c, 365)}
+                                className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-emerald-600 hover:text-white font-semibold text-[11px]"
+                                title="Renovar por mais 1 Ano (365 dias)"
+                              >
+                                +1 Ano
+                              </button>
+
+                              {onInspectClientCompany && (
+                                <button
+                                  type="button"
+                                  onClick={() => onInspectClientCompany(c)}
+                                  className="px-2.5 py-1 rounded bg-slate-900 dark:bg-sky-600 hover:bg-slate-800 text-white font-semibold text-[11px] flex items-center gap-1"
+                                  title="Entrar no sistema de facturação deste cliente em modo suporte"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  <span>Entrar na Conta</span>
+                                </button>
+                              )}
+
+                              {onDeleteClientCompany && companies.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteClientCompany(c.id)}
+                                  className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
+                                  title="Remover registo de cliente"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MÓDULO 3 – PAINEL FINANCEIRO DA ALHAN */}
       {subTab === 'financeiro_alhan' && (
@@ -407,12 +1132,11 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold"
               >
                 <FileSpreadsheet className="w-4 h-4" />
-                <span>Exportar Painel Financeiro (Excel)</span>
+                <span>Exportar Clientes & Subscrições (Excel)</span>
               </button>
             </div>
           </div>
 
-          {/* All 12 Mandatory Financial Indicators Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="p-5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
               <p className="text-xs text-slate-500">1. Total de Subscrições</p>
@@ -515,7 +1239,6 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
             </div>
           </div>
 
-          {/* Subscriptions Near Expiration Table (7, 3 and 1 day alerts) */}
           <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <div>
@@ -582,13 +1305,6 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
             </div>
           </div>
 
-          {validationFeedback && (
-            <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>{validationFeedback}</span>
-            </div>
-          )}
-
           <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -601,7 +1317,7 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
                     <th className="py-3 px-4">Comprovativo</th>
                     <th className="py-3 px-4">Estado</th>
                     <th className="py-3 px-4">Observações Admin</th>
-                    <th className="py-3 px-4 text-right">Decisão Administrativa (Secção 2.4)</th>
+                    <th className="py-3 px-4 text-right">Decisão Administrativa</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -784,100 +1500,6 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
         </div>
       )}
 
-      {subTab === 'empresas' && (
-        <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                Empresas Registadas na Plataforma ALHAN FACTURA
-              </h3>
-              <p className="text-xs text-slate-500">
-                Aprovação de registos, activação/suspensão de subscrições e controlo de mensalidades/anuidades.
-              </p>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
-                <tr>
-                  <th className="py-3 px-4">Empresa / Denominação</th>
-                  <th className="py-3 px-4">NIF</th>
-                  <th className="py-3 px-4">Província</th>
-                  <th className="py-3 px-4">Plano & Ciclo</th>
-                  <th className="py-3 px-4">Estado Subscrição</th>
-                  <th className="py-3 px-4">Adesão AGT</th>
-                  <th className="py-3 px-4 text-right">Acções Administrativas</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {companies.map((c) => (
-                  <tr key={c.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-2.5">
-                        {c.logoUrl ? (
-                          <img
-                            src={c.logoUrl}
-                            alt={c.commercialName}
-                            className="w-8 h-8 rounded object-contain border border-slate-200 bg-white p-0.5 shrink-0"
-                          />
-                        ) : null}
-                        <div>
-                          <p className="font-semibold text-slate-900 dark:text-white">{c.name}</p>
-                          <p className="text-slate-500">
-                            {c.email} · {c.phone}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 font-mono">{c.nif}</td>
-                    <td className="py-3 px-4">{c.province}</td>
-                    <td className="py-3 px-4 uppercase font-mono">
-                      {c.planId} ({c.billingCycle})
-                    </td>
-                    <td className="py-3 px-4">
-                      <span
-                        className={`font-semibold ${
-                          c.subscriptionStatus === 'activa'
-                            ? 'text-emerald-600'
-                            : c.subscriptionStatus === 'suspensa'
-                            ? 'text-red-600'
-                            : 'text-amber-600'
-                        }`}
-                      >
-                        {c.subscriptionStatus.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-slate-500 font-mono">
-                      {c.agtAdhesionStatus || 'em_homologacao'}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <div className="inline-flex items-center gap-1.5">
-                        {c.subscriptionStatus !== 'activa' && (
-                          <button
-                            onClick={() => onUpdateCompanyStatus(c, 'activa')}
-                            className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
-                          >
-                            Activar Conta
-                          </button>
-                        )}
-                        {c.subscriptionStatus !== 'suspensa' && (
-                          <button
-                            onClick={() => onUpdateCompanyStatus(c, 'suspensa')}
-                            className="px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-semibold"
-                          >
-                            Suspender
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       {subTab === 'planos' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {plans.map((plan) => (
@@ -1009,7 +1631,7 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
       {subTab === 'comunicados' && (
         <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4 text-xs max-w-2xl">
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-            Enviar Comunicado Global / Actualização de Legislação Fiscal às Empresas
+            Enviar Comunicado Global / Actualização de Legislação Fiscal às Empresas Clientes
           </h3>
           {broadcastSent && (
             <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-2">
@@ -1051,53 +1673,477 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
         </div>
       )}
 
+      {/* TAB 7: LINK OCULTO ADM, CREDENCIAIS USER/SENHA & AUDITORIA */}
       {subTab === 'seguranca' && (
-        <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                Registo Central de Auditoria Criptográfica & Segurança (Append-Only)
-              </h3>
-              <p className="text-xs text-slate-500">
-                Todos os eventos críticos são gravados de forma imutável sem possibilidade de eliminação.
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs">
+            {/* Hidden Link Card */}
+            <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-amber-500" />
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Links Ocultos do Painel ADM ALHAN (Exclusivos da Administração)
+                </h3>
+              </div>
+              <p className="text-slate-500">
+                Este painel está 100% oculto do site público e da área de trabalho dos clientes. Guarde os links abaixo nos seus favoritos:
               </p>
+
+              <div className="space-y-3">
+                <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                  <p className="font-semibold text-slate-700 dark:text-slate-300">
+                    1. Link Oculto Principal (Hostinger Produção):
+                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <code className="font-mono text-sky-700 dark:text-sky-400 break-all">
+                      {hostingerHiddenLink}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCopyText(
+                          hostingerHiddenLink,
+                          `Link Hostinger copiado: ${hostingerHiddenLink}`
+                        )
+                      }
+                      className="px-2.5 py-1 rounded bg-slate-900 text-white font-semibold shrink-0"
+                    >
+                      Copiar
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                  <p className="font-semibold text-slate-700 dark:text-slate-300">
+                    2. Link Alternativo Universal (Compatível c/ qualquer servidor estático):
+                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <code className="font-mono text-sky-700 dark:text-sky-400 break-all">
+                      {hostingerQueryLink}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCopyText(
+                          hostingerQueryLink,
+                          `Link Alternativo copiado: ${hostingerQueryLink}`
+                        )
+                      }
+                      className="px-2.5 py-1 rounded bg-slate-900 text-white font-semibold shrink-0"
+                    >
+                      Copiar
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                  <p className="font-semibold text-slate-700 dark:text-slate-300">
+                    3. Link no Ambiente Actual:
+                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <code className="font-mono text-emerald-700 dark:text-emerald-400 break-all">
+                      {hiddenAdminPrimaryLink}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCopyText(
+                          hiddenAdminPrimaryLink,
+                          `Link copiado: ${hiddenAdminPrimaryLink}`
+                        )
+                      }
+                      className="px-2.5 py-1 rounded bg-slate-900 text-white font-semibold shrink-0"
+                    >
+                      Copiar
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-amber-600">
-              <AlertTriangle className="w-4 h-4" />
-              <span>Política de Retenção Fiscal: 10 Anos</span>
+
+            {/* Admin User & Password Management Card */}
+            <form
+              onSubmit={handleSaveAdminCredentials}
+              className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4"
+            >
+              <div className="flex items-center gap-2">
+                <KeyRound className="w-4 h-4 text-sky-600" />
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Credenciais Master do Painel ADM (User & Senha)
+                </h3>
+              </div>
+              <p className="text-slate-500">
+                Credenciais exclusivas para abrir o Painel ADM oculto. Pode personalizar o utilizador e a senha abaixo:
+              </p>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Utilizador (User / E-mail ADM)
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newAdminUser}
+                  onChange={(e) => setNewAdminUser(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-mono text-slate-900 dark:text-white bg-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Senha (Palavra-passe ADM)
+                </label>
+                <div className="relative">
+                  <input
+                    type={showAdminPassConfig ? 'text' : 'password'}
+                    required
+                    value={newAdminPass}
+                    onChange={(e) => setNewAdminPass(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 pr-10 font-mono text-slate-900 dark:text-white bg-transparent"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPassConfig(!showAdminPassConfig)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-700"
+                  >
+                    {showAdminPassConfig ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="px-4 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold"
+              >
+                Guardar Credenciais ADM
+              </button>
+            </form>
+          </div>
+
+          {/* Audit Logs Table */}
+          <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Registo Central de Auditoria Criptográfica & Segurança (Append-Only)
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Todos os eventos críticos são gravados de forma imutável sem possibilidade de eliminação.
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-amber-600">
+                <AlertTriangle className="w-4 h-4" />
+                <span>Política de Retenção Fiscal: 10 Anos</span>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                  <tr>
+                    <th className="py-2.5 px-4">Data / Hora (Luanda)</th>
+                    <th className="py-2.5 px-4">Utilizador</th>
+                    <th className="py-2.5 px-4">Perfil</th>
+                    <th className="py-2.5 px-4">Módulo</th>
+                    <th className="py-2.5 px-4">Operação</th>
+                    <th className="py-2.5 px-4">Ref. Alvo</th>
+                    <th className="py-2.5 px-4">Detalhes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {auditLogs.map((log) => (
+                    <tr key={log.id}>
+                      <td className="py-2.5 px-4 font-mono whitespace-nowrap">
+                        {formatLuandaDateTime()}
+                      </td>
+                      <td className="py-2.5 px-4 font-mono">{log.actorEmail}</td>
+                      <td className="py-2.5 px-4">{log.actorRole}</td>
+                      <td className="py-2.5 px-4 font-semibold">{log.module}</td>
+                      <td className="py-2.5 px-4 text-sky-700 dark:text-sky-400 font-medium">
+                        {log.action}
+                      </td>
+                      <td className="py-2.5 px-4 font-mono">{log.targetRef}</td>
+                      <td className="py-2.5 px-4 text-slate-600 dark:text-slate-400">
+                        {log.details}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
-                <tr>
-                  <th className="py-2.5 px-4">Data / Hora (Luanda)</th>
-                  <th className="py-2.5 px-4">Utilizador</th>
-                  <th className="py-2.5 px-4">Perfil</th>
-                  <th className="py-2.5 px-4">Módulo</th>
-                  <th className="py-2.5 px-4">Operação</th>
-                  <th className="py-2.5 px-4">Ref. Alvo</th>
-                  <th className="py-2.5 px-4">Detalhes</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {auditLogs.map((log) => (
-                  <tr key={log.id}>
-                    <td className="py-2.5 px-4 font-mono whitespace-nowrap">
-                      {formatLuandaDateTime()}
-                    </td>
-                    <td className="py-2.5 px-4 font-mono">{log.actorEmail}</td>
-                    <td className="py-2.5 px-4">{log.actorRole}</td>
-                    <td className="py-2.5 px-4 font-semibold">{log.module}</td>
-                    <td className="py-2.5 px-4 text-sky-700 dark:text-sky-400 font-medium">
-                      {log.action}
-                    </td>
-                    <td className="py-2.5 px-4 font-mono">{log.targetRef}</td>
-                    <td className="py-2.5 px-4 text-slate-600 dark:text-slate-400">{log.details}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        </div>
+      )}
+
+      {/* MODAL: CADASTRAR NOVO CLIENTE ALHAN PÓS-VENDA */}
+      {isAddClientModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden my-auto">
+            <div className="px-6 py-4 bg-slate-950 text-white flex items-center justify-between border-b border-slate-800">
+              <div>
+                <h3 className="text-sm font-bold">
+                  Cadastrar Novo Cliente ALHAN FACTURA (Licença Pós-Aquisição)
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Regista a empresa cliente, activa o plano escolhido e cria o Utilizador e Senha de acesso ao sistema.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddClientModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateClientSubmit} className="p-6 space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block font-semibold mb-1">Denominação Social da Empresa *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newClientForm.name}
+                    onChange={(e) => setNewClientForm({ ...newClientForm, name: e.target.value })}
+                    placeholder="Ex.: Grupo Comercial Benguela, Lda."
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 bg-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">NIF da Empresa *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newClientForm.nif}
+                    onChange={(e) => setNewClientForm({ ...newClientForm, nif: e.target.value })}
+                    placeholder="Ex.: 5403991827"
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-mono bg-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Responsável / Director *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newClientForm.responsibleName}
+                    onChange={(e) =>
+                      setNewClientForm({ ...newClientForm, responsibleName: e.target.value })
+                    }
+                    placeholder="Ex.: Dr. António Mateus"
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 bg-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Telefone / WhatsApp *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newClientForm.phone}
+                    onChange={(e) => setNewClientForm({ ...newClientForm, phone: e.target.value })}
+                    placeholder="+244 923 000 000"
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-mono bg-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">
+                    E-mail Corporativo (Utilizador de Login) *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={newClientForm.email}
+                    onChange={(e) => setNewClientForm({ ...newClientForm, email: e.target.value })}
+                    placeholder="geral@empresacliente.ao"
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-mono bg-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">
+                    Senha Inicial do Cliente *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newClientForm.clientPassword}
+                    onChange={(e) =>
+                      setNewClientForm({ ...newClientForm, clientPassword: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-mono font-bold text-sky-700 dark:text-sky-400 bg-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Plano Adquirido *</label>
+                  <select
+                    value={newClientForm.planId}
+                    onChange={(e) =>
+                      setNewClientForm({
+                        ...newClientForm,
+                        planId: e.target.value as PlanIdType,
+                      })
+                    }
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 bg-white dark:bg-slate-800 font-semibold"
+                  >
+                    <option value="starter">Plano Starter / Básico</option>
+                    <option value="profissional">Plano Profissional</option>
+                    <option value="empresarial">Plano Empresarial</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Ciclo de Subscrição *</label>
+                  <select
+                    value={newClientForm.billingCycle}
+                    onChange={(e) =>
+                      setNewClientForm({
+                        ...newClientForm,
+                        billingCycle: e.target.value as BillingCycleType,
+                      })
+                    }
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 bg-white dark:bg-slate-800 font-semibold"
+                  >
+                    <option value="mensal">Mensal (30 Dias)</option>
+                    <option value="trimestral">Trimestral (90 Dias)</option>
+                    <option value="semestral">Semestral (180 Dias)</option>
+                    <option value="anual">Anual (365 Dias)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Valor Pago (Kwanzas / AOA)</label>
+                  <input
+                    type="number"
+                    value={newClientForm.paidAmountKz}
+                    onChange={(e) =>
+                      setNewClientForm({
+                        ...newClientForm,
+                        paidAmountKz: Number(e.target.value),
+                      })
+                    }
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 font-mono bg-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Estado Inicial da Licença</label>
+                  <select
+                    value={newClientForm.subscriptionStatus}
+                    onChange={(e) =>
+                      setNewClientForm({
+                        ...newClientForm,
+                        subscriptionStatus: e.target.value as SubscriptionStatusType,
+                      })
+                    }
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 bg-white dark:bg-slate-800 font-semibold"
+                  >
+                    <option value="activa">ACTIVA (Liberar Acesso Imediato)</option>
+                    <option value="pendente">PENDENTE (Aguardar Pagamento)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddClientModalOpen(false)}
+                  className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                >
+                  Activar & Guardar Cliente ALHAN
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: GERIR CREDENCIAIS E ENVIAR ACESSO AO CLIENTE */}
+      {selectedClientForAccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 space-y-4 text-xs shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div>
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Credenciais do Cliente — {selectedClientForAccess.name}
+                </h4>
+                <p className="text-[11px] text-slate-500">NIF: {selectedClientForAccess.nif}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedClientForAccess(null)}
+                className="text-slate-400 hover:text-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 space-y-2 font-mono">
+              <p>
+                <span className="text-slate-400">Link do Sistema:</span>{' '}
+                <strong>https://plum-quetzal-938419.hostingersite.com/</strong>
+              </p>
+              <p>
+                <span className="text-slate-400">Utilizador (E-mail ou NIF):</span>{' '}
+                <strong>{selectedClientForAccess.email}</strong> (ou{' '}
+                <strong>{selectedClientForAccess.nif}</strong>)
+              </p>
+              <div>
+                <label className="block text-slate-500 font-sans font-semibold mb-1">
+                  Definir / Alterar Senha do Cliente:
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={customClientPassInput}
+                    onChange={(e) => setCustomClientPassInput(e.target.value)}
+                    className="flex-1 rounded border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 font-mono font-bold bg-white dark:bg-slate-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      saveClientAccessPassword(
+                        selectedClientForAccess.id,
+                        customClientPassInput.trim() || 'Alhan2026!'
+                      );
+                      setValidationFeedback(
+                        `Senha do cliente ${selectedClientForAccess.name} actualizada para: ${customClientPassInput}`
+                      );
+                    }}
+                    className="px-3 py-1.5 rounded bg-sky-600 text-white font-sans font-bold"
+                  >
+                    Guardar
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <a
+                href={`https://wa.me/${selectedClientForAccess.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                  `Olá ${selectedClientForAccess.responsibleName} (${selectedClientForAccess.name}),\n\nA sua licença do software *ALHAN FACTURA* (Plano ${selectedClientForAccess.planId.toUpperCase()} - ${selectedClientForAccess.billingCycle.toUpperCase()}) está *${selectedClientForAccess.subscriptionStatus.toUpperCase()}*!\n\n🔗 *Link de Acesso:* https://plum-quetzal-938419.hostingersite.com/\n👤 *Utilizador:* ${selectedClientForAccess.email} (ou NIF ${selectedClientForAccess.nif})\n🔑 *Senha:* ${customClientPassInput}\n📅 *Validade:* ${selectedClientForAccess.subscriptionEndDate || 'Activa'}\n\nSuporte Técnico ALHAN: +244 922 021 211 | facturao@alhan.pro`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="py-2.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-center"
+              >
+                Enviar por WhatsApp
+              </a>
+              <a
+                href={`mailto:${selectedClientForAccess.email}?subject=${encodeURIComponent(
+                  `Dados de Acesso ALHAN FACTURA — ${selectedClientForAccess.name}`
+                )}&body=${encodeURIComponent(
+                  `Exmo(a). ${selectedClientForAccess.responsibleName},\nEmpresa: ${selectedClientForAccess.name} (NIF: ${selectedClientForAccess.nif})\n\nA sua subscrição do software de facturação electrónica ALHAN FACTURA encontra-se ${selectedClientForAccess.subscriptionStatus.toUpperCase()}.\n\nLink de Acesso: https://plum-quetzal-938419.hostingersite.com/\nUtilizador: ${selectedClientForAccess.email} (ou NIF ${selectedClientForAccess.nif})\nPalavra-passe: ${customClientPassInput}\nPlano: ${selectedClientForAccess.planId.toUpperCase()} (${selectedClientForAccess.billingCycle.toUpperCase()})\nValidade: ${selectedClientForAccess.subscriptionEndDate || 'Activa'}\n\nALHAN CONSULTORIA E PRESTAÇÃO DE SERVIÇOS, LDA\nTel: +244 922 021 211 | facturao@alhan.pro`
+                )}`}
+                className="py-2.5 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-center"
+              >
+                Enviar por E-mail
+              </a>
+            </div>
           </div>
         </div>
       )}
