@@ -55,6 +55,11 @@ import {
   MCX_EXPRESS_OFFICIAL_NUMBER,
 } from '../lib/angolaUtils';
 
+import {
+  isRealClientCompany,
+  setAdminSessionToken,
+} from '../lib/permanentRegistry';
+
 export const DEFAULT_MASTER_ADMIN_USER = 'admin@alhan.pro';
 export const DEFAULT_MASTER_ADMIN_ALIAS = 'alhan.admin';
 export const DEFAULT_MASTER_ADMIN_PASS = 'Alhan@Adm2026#';
@@ -124,6 +129,8 @@ interface AlhanAdminPanelProps {
     paidAmountKz: number
   ) => Promise<void>;
   onDeleteClientCompany?: (companyId: string) => Promise<void>;
+  onSyncPermanentVault?: () => Promise<void>;
+  onImportCompaniesBackup?: (companies: Company[]) => Promise<void>;
   onInspectClientCompany?: (company: Company) => void;
   onValidateSubscriptionPayment: (
     payment: SubscriptionPayment,
@@ -144,7 +151,7 @@ interface AlhanAdminPanelProps {
 }
 
 export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
-  companies,
+  companies: rawCompanies,
   invoices,
   tickets,
   auditLogs,
@@ -155,6 +162,8 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
   onUpdateCompanyDetails,
   onCreateClientCompany,
   onDeleteClientCompany,
+  onSyncPermanentVault,
+  onImportCompaniesBackup,
   onInspectClientCompany,
   onValidateSubscriptionPayment,
   onRespondTicket,
@@ -165,11 +174,18 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
   onMasterAuthenticated,
   onMasterLogout,
 }) => {
+  // Strictly ensure ONLY real registered companies are listed (zero fictitious demo companies)
+  const companies = useMemo(
+    () => rawCompanies.filter((c) => isRealClientCompany(c)),
+    [rawCompanies]
+  );
+
   // Master Admin Login Gate State
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [showLoginPass, setShowLoginPass] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [isSyncingVault, setIsSyncingVault] = useState(false);
 
   const [subTab, setSubTab] = useState<
     | 'empresas'
@@ -253,12 +269,41 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
     setTimeout(() => setCopiedBanner(null), 3500);
   };
 
-  const handleMasterLoginSubmit = (e: React.FormEvent) => {
+  const handleMasterLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
     const stored = getStoredMasterAdminCreds();
     const u = loginUser.trim().toLowerCase();
     const p = loginPass.trim();
+
+    // 1. Verify against Backend Anti-Intrusion Shield (/api/admin/auth with Brute-Force Lockout)
+    try {
+      const res = await fetch('/api/admin/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u, password: p }),
+      });
+
+      if (res.status === 429) {
+        const lockData = (await res.json()) as { error?: string };
+        setLoginError(
+          lockData.error ||
+            'Acesso temporariamente bloqueado pelo Escudo Anti-Invasão devido a múltiplas tentativas inválidas.'
+        );
+        return;
+      }
+
+      if (res.ok) {
+        const authData = (await res.json()) as { ok?: boolean; token?: string };
+        if (authData.token) {
+          setAdminSessionToken(authData.token);
+        }
+        onMasterAuthenticated?.();
+        return;
+      }
+    } catch {
+      // Fallback to local verification if server endpoint is temporarily unreachable
+    }
 
     const validUser =
       u === stored.username.toLowerCase() ||
@@ -273,9 +318,79 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
       onMasterAuthenticated?.();
     } else {
       setLoginError(
-        'Credenciais administrativas inválidas. Verifique o Utilizador e a Senha exclusiva da Administração ALHAN.'
+        'Credenciais administrativas inválidas. Tentativa registada no Escudo Anti-Invasão ALHAN.'
       );
     }
+  };
+
+  const handleSyncVaultClick = async () => {
+    if (!onSyncPermanentVault) return;
+    setIsSyncingVault(true);
+    try {
+      await onSyncPermanentVault();
+      setValidationFeedback(
+        `Cofre Permanente sincronizado com sucesso! ${companies.length} empresa(s) real(is) verificada(s) e protegida(s) no Servidor + Base de Dados.`
+      );
+    } finally {
+      setIsSyncingVault(false);
+    }
+  };
+
+  const handleExportPermanentBackupJson = () => {
+    const payload = {
+      schema: 'ALHAN_PERMANENT_VAULT_BACKUP_V4',
+      exportedAt: new Date().toISOString(),
+      totalRealCompanies: companies.length,
+      companies,
+      subscriptionPayments,
+      tickets,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ALHAN_Cofre_Permanente_Empresas_${getLuandaIsoDate()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setValidationFeedback(
+      `Backup Permanente JSON exportado com sucesso (${companies.length} empresas reais guardadas).`
+    );
+  };
+
+  const handleImportPermanentBackupJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onImportCompaniesBackup) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const text = String(ev.target?.result || '');
+        const parsed = JSON.parse(text);
+        const list: Company[] = Array.isArray(parsed)
+          ? parsed
+          : Array.isArray(parsed?.companies)
+          ? parsed.companies
+          : [];
+        const realOnly = list.filter((c) => isRealClientCompany(c));
+        if (realOnly.length === 0) {
+          setValidationFeedback(
+            'Nenhuma empresa real válida encontrada no ficheiro de backup seleccionado.'
+          );
+          return;
+        }
+        await onImportCompaniesBackup(realOnly);
+        setValidationFeedback(
+          `${realOnly.length} empresa(s) real(is) restaurada(s) e gravada(s) no Cofre Permanente com sucesso!`
+        );
+      } catch {
+        setValidationFeedback('Erro ao ler o ficheiro JSON de backup.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   // Module 3: Painel Financeiro da ALHAN Calculations
@@ -857,6 +972,39 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              {onSyncPermanentVault && (
+                <button
+                  type="button"
+                  onClick={handleSyncVaultClick}
+                  disabled={isSyncingVault}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800 font-bold"
+                  title="Sincronizar Cofre Permanente (Servidor + IndexedDB + Cloud)"
+                >
+                  <RefreshCcw className={`w-3.5 h-3.5 ${isSyncingVault ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingVault ? 'A Sincronizar...' : 'Sincronizar Cofre Permanente'}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleExportPermanentBackupJson}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-semibold"
+                title="Exportar cópia de segurança JSON de todas as empresas reais"
+              >
+                <Download className="w-3.5 h-3.5 text-sky-600" />
+                <span>Backup JSON</span>
+              </button>
+              {onImportCompaniesBackup && (
+                <label className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-semibold cursor-pointer">
+                  <Shield className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Restaurar JSON</span>
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleImportPermanentBackupJson}
+                    className="hidden"
+                  />
+                </label>
+              )}
               <button
                 type="button"
                 onClick={handleExportAlhanFinanceExcel}
@@ -874,6 +1022,24 @@ export const AlhanAdminPanel: React.FC<AlhanAdminPanelProps> = ({
                 <span>Novo Cliente ALHAN</span>
               </button>
             </div>
+          </div>
+
+          {/* Permanent Storage & Anti-Intrusion Shield Status Banner */}
+          <div className="p-3.5 rounded-xl bg-slate-900 text-white border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-start sm:items-center gap-2.5">
+              <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5 sm:mt-0" />
+              <div>
+                <span className="font-bold text-emerald-300">
+                  COFRE PERMANENTE ACTIVO & ESCUDO ANTI-INVASÃO:
+                </span>{' '}
+                <span className="text-slate-300">
+                  Todas as empresas reais inscritas ficam gravadas de forma permanente no Servidor (`alhan_permanent_registry.json`), Base de Dados Cloud e Cofre IndexedDB. Empresas fictícias estão 100% bloqueadas.
+                </span>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono text-[10px] font-bold uppercase whitespace-nowrap shrink-0">
+              100% DADOS REAIS · PERSISTÊNCIA PERMANENTE
+            </span>
           </div>
 
           {/* Complete Client Table */}

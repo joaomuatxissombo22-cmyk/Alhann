@@ -100,6 +100,22 @@ import { OperationsModules } from './components/OperationsModules';
 import { MulticaixaCheckoutModal } from './components/MulticaixaCheckoutModal';
 import { OfflineIndicator, PWAInstallButton } from './components/PWAInstallBanner';
 import { useOnlineStatus } from './hooks/usePWAInstall';
+import {
+  deletePermanentCompany,
+  getAdminSessionToken,
+  loadLocalPermanentAuditLogs,
+  loadLocalPermanentCompanies,
+  loadLocalPermanentPayments,
+  loadLocalPermanentTickets,
+  mergeRealCompanies,
+  registerCompanyPermanently,
+  savePermanentAuditLogs,
+  savePermanentCompanies,
+  savePermanentPayments,
+  savePermanentTickets,
+  setAdminSessionToken,
+  syncWithPermanentServerVault,
+} from './lib/permanentRegistry';
 
 type WorkspaceTab =
   | 'dashboard'
@@ -187,8 +203,8 @@ export default function App() {
   const isOnline = useOnlineStatus();
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
 
-  // Multi-Tenant State
-  const [companies, setCompanies] = useState<Company[]>([]);
+  // Multi-Tenant State (Initialized from Permanent Local Vault with zero fictitious data)
+  const [companies, setCompanies] = useState<Company[]>(() => loadLocalPermanentCompanies());
   const [clients, setClients] = useState<Client[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -196,9 +212,11 @@ export default function App() {
   const [transactions, setTransactions] = useState<FinancialTransaction[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [tickets, setTickets] = useState<SupportTicket[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [subscriptionPayments, setSubscriptionPayments] = useState<SubscriptionPayment[]>([]);
+  const [tickets, setTickets] = useState<SupportTicket[]>(() => loadLocalPermanentTickets());
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadLocalPermanentAuditLogs());
+  const [subscriptionPayments, setSubscriptionPayments] = useState<SubscriptionPayment[]>(() =>
+    loadLocalPermanentPayments()
+  );
   const [agtLogs, setAgtLogs] = useState<AgtCommunicationLog[]>([]);
   const [plans, setPlans] = useState<SubscriptionPlanConfig[]>(INITIAL_PLANS);
   const [isMcxCheckoutOpen, setIsMcxCheckoutOpen] = useState(false);
@@ -250,24 +268,39 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Listen to popstate/hashchange for the hidden Admin URL & purge old fictitious storage keys
-  useEffect(() => {
-    try {
-      localStorage.removeItem('alhan_all_clients_companies_v1');
-      localStorage.removeItem('alhan_registered_company_v1');
-      const savedCleanRaw = localStorage.getItem('alhan_clean_companies_v3');
-      if (savedCleanRaw) {
-        const parsed = JSON.parse(savedCleanRaw) as Company[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setCompanies(parsed);
-        }
-      }
-    } catch {
-      // ignore storage errors
+  // Synchronize with Permanent Vault (localStorage + Legacy Recovery + IndexedDB + Server Vault)
+  const refreshFromPermanentVault = async () => {
+    const localRecovered = loadLocalPermanentCompanies();
+    if (localRecovered.length > 0) {
+      setCompanies((prev) => mergeRealCompanies(localRecovered, prev));
     }
+    const synced = await syncWithPermanentServerVault(localRecovered);
+    if (synced.companies.length > 0) {
+      setCompanies((prev) => mergeRealCompanies(synced.companies, prev));
+    }
+    if (synced.subscriptionPayments.length > 0) {
+      setSubscriptionPayments((prev) =>
+        synced.subscriptionPayments.length >= prev.length ? synced.subscriptionPayments : prev
+      );
+    }
+    if (synced.tickets.length > 0) {
+      setTickets((prev) => (synced.tickets.length >= prev.length ? synced.tickets : prev));
+    }
+    if (synced.auditLogs.length > 0) {
+      setAuditLogs((prev) => (synced.auditLogs.length >= prev.length ? synced.auditLogs : prev));
+    }
+  };
+
+  // Listen to popstate/hashchange for the hidden Admin URL & sync Permanent Vault on startup
+  useEffect(() => {
+    void refreshFromPermanentVault();
 
     const syncAdminRoute = () => {
-      setIsHiddenAdminRoute(checkIsAdminLocation());
+      const isAdminLoc = checkIsAdminLocation();
+      setIsHiddenAdminRoute(isAdminLoc);
+      if (isAdminLoc) {
+        void refreshFromPermanentVault();
+      }
     };
     window.addEventListener('popstate', syncAdminRoute);
     window.addEventListener('hashchange', syncAdminRoute);
@@ -277,29 +310,42 @@ export default function App() {
     };
   }, []);
 
-  const persistCompaniesList = (list: Company[]) => {
-    try {
-      localStorage.setItem('alhan_clean_companies_v3', JSON.stringify(list));
-      if (list[0]) {
-        localStorage.setItem('alhan_clean_active_company_v3', JSON.stringify(list[0]));
-      } else {
-        localStorage.removeItem('alhan_clean_active_company_v3');
-      }
-    } catch {
-      // ignore storage errors
-    }
+  const persistCompaniesList = (list: Company[], activeComp?: Company | null) => {
+    const clean = savePermanentCompanies(list, activeComp);
+    void syncWithPermanentServerVault(clean);
+    return clean;
   };
 
   // Real-Time Firestore Listeners when Authenticated
   useEffect(() => {
     if (!authReady || !currentUser || isDemoMode) return;
     const uid = currentUser.uid;
+    const isBootstrappedMasterAdmin =
+      currentUser.email?.toLowerCase() === 'joaomuatxissombo22@gmail.com';
 
-    const qCompanies = query(collection(db, 'companies'), where('ownerId', '==', uid));
+    const qCompanies = isBootstrappedMasterAdmin
+      ? query(collection(db, 'companies'))
+      : query(collection(db, 'companies'), where('ownerId', '==', uid));
+
     const unsubCompanies = onSnapshot(
       qCompanies,
       (snap) => {
-        setCompanies(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Company, 'id'>) })));
+        const fromFirestore = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<Company, 'id'>),
+        }));
+        setCompanies((prev) => {
+          const merged = mergeRealCompanies(
+            fromFirestore,
+            prev,
+            loadLocalPermanentCompanies()
+          );
+          savePermanentCompanies(merged);
+          if (merged.length > 0) {
+            void syncWithPermanentServerVault(merged);
+          }
+          return merged;
+        });
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'companies')
     );
@@ -375,35 +421,71 @@ export default function App() {
       (err) => handleFirestoreError(err, OperationType.LIST, 'team_members')
     );
 
-    const qTickets = query(collection(db, 'support_tickets'), where('ownerId', '==', uid));
+    const qTickets = isBootstrappedMasterAdmin
+      ? query(collection(db, 'support_tickets'))
+      : query(collection(db, 'support_tickets'), where('ownerId', '==', uid));
     const unsubTickets = onSnapshot(
       qTickets,
       (snap) => {
-        setTickets(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<SupportTicket, 'id'>) }))
-        );
+        const fromFs = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<SupportTicket, 'id'>),
+        }));
+        if (fromFs.length > 0) {
+          setTickets((prev) => {
+            const byId = new Map<string, SupportTicket>();
+            for (const item of [...fromFs, ...prev]) byId.set(item.id, item);
+            const merged = Array.from(byId.values());
+            savePermanentTickets(merged);
+            return merged;
+          });
+        }
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'support_tickets')
     );
 
-    const qLogs = query(collection(db, 'audit_logs'), where('ownerId', '==', uid));
+    const qLogs = isBootstrappedMasterAdmin
+      ? query(collection(db, 'audit_logs'))
+      : query(collection(db, 'audit_logs'), where('ownerId', '==', uid));
     const unsubLogs = onSnapshot(
       qLogs,
       (snap) => {
-        setAuditLogs(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AuditLog, 'id'>) }))
-        );
+        const fromFs = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<AuditLog, 'id'>),
+        }));
+        if (fromFs.length > 0) {
+          setAuditLogs((prev) => {
+            const byId = new Map<string, AuditLog>();
+            for (const item of [...fromFs, ...prev]) byId.set(item.id, item);
+            const merged = Array.from(byId.values());
+            savePermanentAuditLogs(merged);
+            return merged;
+          });
+        }
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'audit_logs')
     );
 
-    const qSubPay = query(collection(db, 'subscription_payments'), where('ownerId', '==', uid));
+    const qSubPay = isBootstrappedMasterAdmin
+      ? query(collection(db, 'subscription_payments'))
+      : query(collection(db, 'subscription_payments'), where('ownerId', '==', uid));
     const unsubSubPay = onSnapshot(
       qSubPay,
       (snap) => {
-        setSubscriptionPayments(
-          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<SubscriptionPayment, 'id'>) }))
-        );
+        const fromFs = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<SubscriptionPayment, 'id'>),
+        }));
+        if (fromFs.length > 0) {
+          setSubscriptionPayments((prev) => {
+            const byId = new Map<string, SubscriptionPayment>();
+            for (const item of [...fromFs, ...prev]) byId.set(item.id, item);
+            const merged = Array.from(byId.values());
+            savePermanentPayments(merged);
+            return merged;
+          });
+        }
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'subscription_payments')
     );
@@ -486,40 +568,40 @@ export default function App() {
     resetClientWorkspaceData();
 
     try {
-      const allRaw = localStorage.getItem('alhan_clean_companies_v3');
-      if (allRaw) {
-        const allList = JSON.parse(allRaw) as Company[];
-        if (Array.isArray(allList) && allList.length > 0) {
-          const matched = allList.find(
-            (c) =>
-              c.email.toLowerCase() === email.toLowerCase() ||
-              (nifInput && c.nif.toLowerCase() === nifInput.toLowerCase())
-          );
-          if (matched) {
-            const reordered = [matched, ...allList.filter((c) => c.id !== matched.id)];
-            setCompanies(reordered);
-            setTeamMembers([
-              {
-                id: sanitizeId('tm'),
-                ownerId: matched.ownerId,
-                companyId: matched.id,
-                name: matched.responsibleName || name,
-                email: matched.email,
-                role: 'Administrador',
-                establishment: 'Sede Principal',
-                permissionsSummary:
-                  'Acesso Total: Facturação, SAF-T, AGT, Financeiro, Stock, Utilizadores e Configurações',
-                status: 'activo',
-              },
-            ]);
-            setIsDemoMode(true);
-            setActiveTab('dashboard');
-            return;
-          }
+      const synced = await syncWithPermanentServerVault(loadLocalPermanentCompanies());
+      const allList = mergeRealCompanies(synced.companies, companies);
+      if (allList.length > 0) {
+        const matched = allList.find(
+          (c) =>
+            c.email.toLowerCase() === email.toLowerCase() ||
+            (nifInput && c.nif.toLowerCase() === nifInput.toLowerCase()) ||
+            c.nif.toLowerCase() === email.toLowerCase()
+        );
+        if (matched) {
+          const reordered = [matched, ...allList.filter((c) => c.id !== matched.id)];
+          setCompanies(reordered);
+          savePermanentCompanies(reordered, matched);
+          setTeamMembers([
+            {
+              id: sanitizeId('tm'),
+              ownerId: matched.ownerId,
+              companyId: matched.id,
+              name: matched.responsibleName || name,
+              email: matched.email,
+              role: 'Administrador',
+              establishment: 'Sede Principal',
+              permissionsSummary:
+                'Acesso Total: Facturação, SAF-T, AGT, Financeiro, Stock, Utilizadores e Configurações',
+              status: 'activo',
+            },
+          ]);
+          setIsDemoMode(true);
+          setActiveTab('dashboard');
+          return;
         }
       }
     } catch {
-      // ignore localStorage parse error
+      // ignore sync error
     }
 
     // If no company exists yet for this login, open the clean Company Registration form (no fake company created)
@@ -528,20 +610,10 @@ export default function App() {
     setIsRegisterModalOpen(true);
   };
 
-  // Clean Mode Handler (No Fictitious Data)
+  // Load all real companies from Permanent Vault (Zero Fictitious Data)
   const handleEnterDemoMode = async () => {
     resetClientWorkspaceData();
-    try {
-      const storedAll = localStorage.getItem('alhan_clean_companies_v3');
-      if (storedAll) {
-        const parsed = JSON.parse(storedAll) as Company[];
-        if (Array.isArray(parsed)) {
-          setCompanies(parsed);
-        }
-      }
-    } catch {
-      // ignore
-    }
+    await refreshFromPermanentVault();
   };
 
   // Audit Log Helper
@@ -566,8 +638,13 @@ export default function App() {
       details: details.slice(0, 500),
     };
 
+    setAuditLogs((prev) => {
+      const updated = [newLog, ...prev];
+      savePermanentAuditLogs(updated);
+      return updated;
+    });
+
     if (isDemoMode || !currentUser) {
-      setAuditLogs((prev) => [newLog, ...prev]);
       return;
     }
 
@@ -588,7 +665,7 @@ export default function App() {
     }
   };
 
-  // Register Company with 100% Clean Workspace (Zero Fictitious Data)
+  // Register Company with 100% Clean Workspace & Permanent Multi-Layer Vault Persistence
   const handleRegisterCompany = async (
     companyData: Omit<Company, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>,
     _seedInitialData: boolean
@@ -601,18 +678,12 @@ export default function App() {
       ...companyData,
     };
 
-    try {
-      localStorage.setItem('alhan_clean_active_company_v3', JSON.stringify(newCompanyObj));
-      const existingAllRaw = localStorage.getItem('alhan_clean_companies_v3');
-      const existingAll: Company[] = existingAllRaw ? JSON.parse(existingAllRaw) : [];
-      const updatedAll = [
-        newCompanyObj,
-        ...existingAll.filter((c) => c.id !== newCompanyObj.id && c.nif !== newCompanyObj.nif),
-      ];
-      localStorage.setItem('alhan_clean_companies_v3', JSON.stringify(updatedAll));
-    } catch {
-      // ignore storage quota errors
-    }
+    // 1. Always save permanently in Local Vault + IndexedDB + Backend Server Vault
+    const updatedPermanent = await registerCompanyPermanently(newCompanyObj);
+    setCompanies([
+      newCompanyObj,
+      ...updatedPermanent.filter((c) => c.id !== newCompanyObj.id && c.nif !== newCompanyObj.nif),
+    ]);
 
     resetClientWorkspaceData();
     setTeamMembers([
@@ -630,11 +701,15 @@ export default function App() {
       },
     ]);
 
+    await logAuditEvent(
+      'REGISTO_EMPRESA_INICIAL',
+      'Empresas',
+      companyData.nif,
+      `Empresa ${companyData.name} (NIF ${companyData.nif}) registada de forma permanente com plano ${companyData.planId.toUpperCase()}.`,
+      compId
+    );
+
     if (!currentUser) {
-      setCompanies((prev) => [
-        newCompanyObj,
-        ...prev.filter((c) => c.id !== newCompanyObj.id && c.nif !== newCompanyObj.nif),
-      ]);
       setIsDemoMode(true);
       setIsRegisterModalOpen(false);
       setIsAuthModalOpen(false);
@@ -665,13 +740,6 @@ export default function App() {
         updatedAt: serverTimestamp(),
       });
 
-      await logAuditEvent(
-        'REGISTO_EMPRESA_INICIAL',
-        'Empresas',
-        companyData.nif,
-        `Empresa ${companyData.name} registada com plano ${companyData.planId.toUpperCase()}.`,
-        compId
-      );
       setIsRegisterModalOpen(false);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `companies/${compId}`);
@@ -1206,6 +1274,183 @@ export default function App() {
     }
   }, [activeRoleView]);
 
+  const handleAdminUpdateCompanyStatus = async (
+    comp: Company,
+    newStatus: SubscriptionStatusType
+  ) => {
+    setCompanies((prev) => {
+      const updated = prev.map((c) =>
+        c.id === comp.id ? { ...c, subscriptionStatus: newStatus } : c
+      );
+      persistCompaniesList(updated);
+      return updated;
+    });
+    try {
+      const token = getAdminSessionToken();
+      await fetch(`/api/registry/companies/${encodeURIComponent(comp.id)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'X-Alhan-Admin-Token': token } : {}),
+        },
+        body: JSON.stringify({ subscriptionStatus: newStatus }),
+      });
+    } catch {
+      // local & idb already updated
+    }
+    if (!isDemoMode && currentUser) {
+      try {
+        await updateDoc(doc(db, 'companies', comp.id), {
+          subscriptionStatus: newStatus,
+          updatedAt: serverTimestamp(),
+        });
+      } catch {
+        // ignore if local-only company
+      }
+    }
+    await logAuditEvent(
+      'ALTERAR_ESTADO_SUBSCRICAO',
+      'Admin Central ALHAN',
+      comp.nif,
+      `Estado da licença da empresa ${comp.name} alterado para ${newStatus.toUpperCase()}.`
+    );
+  };
+
+  const handleAdminUpdateCompanyDetails = async (
+    companyId: string,
+    updates: Partial<Company>
+  ) => {
+    setCompanies((prev) => {
+      const updated = prev.map((c) => (c.id === companyId ? { ...c, ...updates } : c));
+      persistCompaniesList(updated);
+      return updated;
+    });
+    try {
+      const token = getAdminSessionToken();
+      await fetch(`/api/registry/companies/${encodeURIComponent(companyId)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'X-Alhan-Admin-Token': token } : {}),
+        },
+        body: JSON.stringify(updates),
+      });
+    } catch {
+      // ignore
+    }
+    if (!isDemoMode && currentUser) {
+      try {
+        await updateDoc(doc(db, 'companies', companyId), {
+          ...updates,
+          updatedAt: serverTimestamp(),
+        });
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  const handleAdminCreateClientCompany = async (
+    companyData: Omit<Company, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>,
+    clientPassword: string,
+    paidAmountKz: number
+  ) => {
+    const newId = sanitizeId('comp');
+    const newCompany: Company = {
+      id: newId,
+      ownerId: currentUser?.uid || 'alhan_admin_managed',
+      ...companyData,
+    };
+    saveClientAccessPassword(newId, clientPassword);
+
+    let payRecord: SubscriptionPayment | undefined;
+    if (paidAmountKz > 0) {
+      payRecord = {
+        id: sanitizeId('subpay'),
+        ownerId: newCompany.ownerId,
+        companyId: newId,
+        companyName: newCompany.name,
+        companyNif: newCompany.nif,
+        planId: newCompany.planId,
+        billingCycle: newCompany.billingCycle,
+        amountKz: paidAmountKz,
+        mcxChannelNumber: MCX_EXPRESS_OFFICIAL_NUMBER,
+        beneficiaryName: MCX_EXPRESS_BENEFICIARY,
+        orderReference: `ALH-${newCompany.nif.slice(-4)}-${Date.now().toString().slice(-4)}`,
+        transactionReference: `MCX-ADM-${Date.now().toString().slice(-6)}`,
+        paymentModality: 'confirmacao_administrativa',
+        proofFileName: 'Activacao_Directa_Painel_ADM.pdf',
+        proofDataUrl: '',
+        paymentDeadline: getLuandaIsoDate(),
+        status: newCompany.subscriptionStatus === 'activa' ? 'confirmado' : 'pendente',
+        adminNotes: 'Cliente registado e activado de forma permanente no Painel ADM ALHAN.',
+        receiptNumber:
+          newCompany.subscriptionStatus === 'activa'
+            ? `REC-ALHAN-${Date.now().toString().slice(-5)}`
+            : '',
+      };
+      setSubscriptionPayments((prev) => {
+        const next = [payRecord!, ...prev];
+        savePermanentPayments(next);
+        return next;
+      });
+    }
+
+    const updatedPermanent = await registerCompanyPermanently(
+      newCompany,
+      clientPassword,
+      payRecord
+    );
+    setCompanies(updatedPermanent);
+
+    if (currentUser) {
+      try {
+        await setDoc(doc(db, 'companies', newId), {
+          ownerId: newCompany.ownerId,
+          ...companyData,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        if (payRecord) {
+          const { id: payId, ...payPayload } = payRecord;
+          await setDoc(doc(db, 'subscription_payments', payId), {
+            ...payPayload,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      } catch {
+        // Already persisted in Permanent Server Vault + Local Vault
+      }
+    }
+
+    await logAuditEvent(
+      'CADASTRAR_CLIENTE_POS_VENDA',
+      'Admin Central ALHAN',
+      newCompany.nif,
+      `Registado novo cliente permanente ${newCompany.name} no plano ${newCompany.planId.toUpperCase()} (${newCompany.billingCycle}).`
+    );
+  };
+
+  const handleAdminDeleteClientCompany = async (companyId: string) => {
+    const target = companies.find((c) => c.id === companyId);
+    const remaining = await deletePermanentCompany(companyId, target?.nif);
+    setCompanies(remaining);
+  };
+
+  const handleAdminImportCompaniesBackup = async (importedCompanies: Company[]) => {
+    const merged = mergeRealCompanies(importedCompanies, companies);
+    setCompanies(merged);
+    savePermanentCompanies(merged);
+    await syncWithPermanentServerVault(merged);
+    await logAuditEvent(
+      'RESTAURAR_BACKUP_EMPRESAS',
+      'Admin Central ALHAN',
+      `${merged.length} Empresas`,
+      `Restauradas e sincronizadas ${merged.length} empresas reais no Cofre Permanente ALHAN.`
+    );
+  };
+
   // Render Hidden Master Admin Portal when accessed via /painel-adm-alhan or /?adm=alhan
   if (isHiddenAdminRoute) {
     return (
@@ -1220,14 +1465,13 @@ export default function App() {
               } catch {
                 // ignore
               }
-              if (companies.length === 0) {
-                await handleEnterDemoMode();
-              }
+              await refreshFromPermanentVault();
               setIsMasterAdminAuthenticated(true);
             }}
             onMasterLogout={() => {
               try {
                 sessionStorage.removeItem('alhan_master_admin_session_v1');
+                setAdminSessionToken('');
               } catch {
                 // ignore
               }
@@ -1246,102 +1490,12 @@ export default function App() {
             plans={plans}
             subscriptionPayments={subscriptionPayments}
             onUpdatePlans={setPlans}
-            onUpdateCompanyStatus={async (comp, newStatus: SubscriptionStatusType) => {
-              setCompanies((prev) => {
-                const updated = prev.map((c) =>
-                  c.id === comp.id ? { ...c, subscriptionStatus: newStatus } : c
-                );
-                persistCompaniesList(updated);
-                return updated;
-              });
-              if (!isDemoMode && currentUser) {
-                try {
-                  await updateDoc(doc(db, 'companies', comp.id), {
-                    subscriptionStatus: newStatus,
-                    updatedAt: serverTimestamp(),
-                  });
-                } catch {
-                  // local update already persisted
-                }
-              }
-              await logAuditEvent(
-                'ALTERAR_ESTADO_SUBSCRICAO',
-                'Admin Central ALHAN',
-                comp.nif,
-                `Estado da licença da empresa ${comp.name} alterado para ${newStatus.toUpperCase()}.`
-              );
-            }}
-            onUpdateCompanyDetails={async (companyId, updates) => {
-              setCompanies((prev) => {
-                const updated = prev.map((c) => (c.id === companyId ? { ...c, ...updates } : c));
-                persistCompaniesList(updated);
-                return updated;
-              });
-              if (!isDemoMode && currentUser) {
-                try {
-                  await updateDoc(doc(db, 'companies', companyId), {
-                    ...updates,
-                    updatedAt: serverTimestamp(),
-                  });
-                } catch {
-                  // ignore
-                }
-              }
-            }}
-            onCreateClientCompany={async (companyData, clientPassword, paidAmountKz) => {
-              const newId = sanitizeId('comp');
-              const newCompany: Company = {
-                id: newId,
-                ownerId: currentUser?.uid || 'alhan_admin_managed',
-                ...companyData,
-              };
-              saveClientAccessPassword(newId, clientPassword);
-              setCompanies((prev) => {
-                const updated = [newCompany, ...prev];
-                persistCompaniesList(updated);
-                return updated;
-              });
-              if (paidAmountKz > 0) {
-                const payRecord: SubscriptionPayment = {
-                  id: sanitizeId('subpay'),
-                  ownerId: newCompany.ownerId,
-                  companyId: newId,
-                  companyName: newCompany.name,
-                  companyNif: newCompany.nif,
-                  planId: newCompany.planId,
-                  billingCycle: newCompany.billingCycle,
-                  amountKz: paidAmountKz,
-                  mcxChannelNumber: MCX_EXPRESS_OFFICIAL_NUMBER,
-                  beneficiaryName: MCX_EXPRESS_BENEFICIARY,
-                  orderReference: `ALH-${newCompany.nif.slice(-4)}-${Date.now().toString().slice(-4)}`,
-                  transactionReference: `MCX-ADM-${Date.now().toString().slice(-6)}`,
-                  paymentModality: 'confirmacao_administrativa',
-                  proofFileName: 'Activacao_Directa_Painel_ADM.pdf',
-                  proofDataUrl: '',
-                  paymentDeadline: getLuandaIsoDate(),
-                  status: newCompany.subscriptionStatus === 'activa' ? 'confirmado' : 'pendente',
-                  adminNotes: 'Cliente registado e activado directamente no Painel ADM ALHAN.',
-                  receiptNumber:
-                    newCompany.subscriptionStatus === 'activa'
-                      ? `REC-ALHAN-${Date.now().toString().slice(-5)}`
-                      : '',
-                };
-                setSubscriptionPayments((prev) => [payRecord, ...prev]);
-              }
-              await logAuditEvent(
-                'CADASTRAR_CLIENTE_POS_VENDA',
-                'Admin Central ALHAN',
-                newCompany.nif,
-                `Registado novo cliente ${newCompany.name} no plano ${newCompany.planId.toUpperCase()} (${newCompany.billingCycle}).`
-              );
-            }}
-            onDeleteClientCompany={async (companyId) => {
-              setCompanies((prev) => {
-                const updated = prev.filter((c) => c.id !== companyId);
-                persistCompaniesList(updated);
-                return updated;
-              });
-            }}
+            onUpdateCompanyStatus={handleAdminUpdateCompanyStatus}
+            onUpdateCompanyDetails={handleAdminUpdateCompanyDetails}
+            onCreateClientCompany={handleAdminCreateClientCompany}
+            onDeleteClientCompany={handleAdminDeleteClientCompany}
+            onSyncPermanentVault={refreshFromPermanentVault}
+            onImportCompaniesBackup={handleAdminImportCompaniesBackup}
             onInspectClientCompany={(comp) => {
               setCompanies((prev) => [comp, ...prev.filter((c) => c.id !== comp.id)]);
               setIsDemoMode(true);
@@ -1357,8 +1511,8 @@ export default function App() {
                   ? payment.receiptNumber || `REC-ALHAN-${Date.now().toString().slice(-5)}`
                   : payment.receiptNumber;
 
-              setSubscriptionPayments((prev) =>
-                prev.map((p) =>
+              setSubscriptionPayments((prev) => {
+                const next = prev.map((p) =>
                   p.id === payment.id
                     ? {
                         ...p,
@@ -1367,33 +1521,30 @@ export default function App() {
                         receiptNumber: generatedReceipt,
                       }
                     : p
-                )
-              );
+                );
+                savePermanentPayments(next);
+                return next;
+              });
               if (decision === 'confirmado') {
-                setCompanies((prev) => {
-                  const updated = prev.map((c) =>
-                    c.id === payment.companyId
-                      ? {
-                          ...c,
-                          planId: payment.planId,
-                          billingCycle: payment.billingCycle,
-                          subscriptionStatus: 'activa' as SubscriptionStatusType,
-                          subscriptionStartDate: today,
-                          subscriptionEndDate: newEndDate,
-                        }
-                      : c
-                  );
-                  persistCompaniesList(updated);
-                  return updated;
+                await handleAdminUpdateCompanyDetails(payment.companyId, {
+                  planId: payment.planId,
+                  billingCycle: payment.billingCycle,
+                  subscriptionStatus: 'activa' as SubscriptionStatusType,
+                  subscriptionStartDate: today,
+                  subscriptionEndDate: newEndDate,
                 });
               }
+              void syncWithPermanentServerVault(companies);
             }}
             onRespondTicket={async (tkt, responseText, newStatus) => {
-              setTickets((prev) =>
-                prev.map((t) =>
+              setTickets((prev) => {
+                const next = prev.map((t) =>
                   t.id === tkt.id ? { ...t, adminResponse: responseText, status: newStatus } : t
-                )
-              );
+                );
+                savePermanentTickets(next);
+                return next;
+              });
+              void syncWithPermanentServerVault(companies);
             }}
             onBroadcastNotice={(title, message) => setGlobalNotice({ title, message })}
           />
@@ -3140,30 +3291,12 @@ export default function App() {
               plans={plans}
               subscriptionPayments={subscriptionPayments}
               onUpdatePlans={setPlans}
-              onUpdateCompanyStatus={async (comp, newStatus: SubscriptionStatusType) => {
-                if (isDemoMode || !currentUser) {
-                  setCompanies((prev) =>
-                    prev.map((c) =>
-                      c.id === comp.id ? { ...c, subscriptionStatus: newStatus } : c
-                    )
-                  );
-                  return;
-                }
-                try {
-                  await updateDoc(doc(db, 'companies', comp.id), {
-                    subscriptionStatus: newStatus,
-                    updatedAt: serverTimestamp(),
-                  });
-                  await logAuditEvent(
-                    'ALTERAR_ESTADO_SUBSCRICAO',
-                    'Admin Central ALHAN',
-                    comp.nif,
-                    `Estado da conta da empresa ${comp.name} alterado para ${newStatus.toUpperCase()}.`
-                  );
-                } catch (err) {
-                  handleFirestoreError(err, OperationType.UPDATE, `companies/${comp.id}`);
-                }
-              }}
+              onUpdateCompanyStatus={handleAdminUpdateCompanyStatus}
+              onUpdateCompanyDetails={handleAdminUpdateCompanyDetails}
+              onCreateClientCompany={handleAdminCreateClientCompany}
+              onDeleteClientCompany={handleAdminDeleteClientCompany}
+              onSyncPermanentVault={refreshFromPermanentVault}
+              onImportCompaniesBackup={handleAdminImportCompaniesBackup}
               onValidateSubscriptionPayment={async (payment, decision, adminNotes) => {
                 const today = getLuandaIsoDate();
                 const newEndDate = calcularDataVencimentoSubscricao(today, payment.billingCycle);
@@ -3172,91 +3305,67 @@ export default function App() {
                     ? payment.receiptNumber || `REC-ALHAN-${Date.now().toString().slice(-5)}`
                     : payment.receiptNumber;
 
-                if (isDemoMode || !currentUser) {
-                  setSubscriptionPayments((prev) =>
-                    prev.map((p) =>
-                      p.id === payment.id
-                        ? {
-                            ...p,
-                            status: decision,
-                            adminNotes,
-                            receiptNumber: generatedReceipt,
-                          }
-                        : p
-                    )
+                setSubscriptionPayments((prev) => {
+                  const next = prev.map((p) =>
+                    p.id === payment.id
+                      ? {
+                          ...p,
+                          status: decision,
+                          adminNotes,
+                          receiptNumber: generatedReceipt,
+                        }
+                      : p
                   );
-                  if (decision === 'confirmado') {
-                    setCompanies((prev) =>
-                      prev.map((c) =>
-                        c.id === payment.companyId
-                          ? {
-                              ...c,
-                              planId: payment.planId,
-                              billingCycle: payment.billingCycle,
-                              subscriptionStatus: 'activa',
-                              subscriptionStartDate: today,
-                              subscriptionEndDate: newEndDate,
-                            }
-                          : c
-                      )
-                    );
-                  }
-                  return;
+                  savePermanentPayments(next);
+                  return next;
+                });
+
+                if (decision === 'confirmado') {
+                  await handleAdminUpdateCompanyDetails(payment.companyId, {
+                    planId: payment.planId,
+                    billingCycle: payment.billingCycle,
+                    subscriptionStatus: 'activa',
+                    subscriptionStartDate: today,
+                    subscriptionEndDate: newEndDate,
+                  });
                 }
 
-                try {
-                  await updateDoc(doc(db, 'subscription_payments', payment.id), {
-                    status: decision,
-                    adminNotes: adminNotes.slice(0, 490),
-                    receiptNumber: generatedReceipt.slice(0, 75),
-                    updatedAt: serverTimestamp(),
-                  });
-
-                  if (decision === 'confirmado') {
-                    await updateDoc(doc(db, 'companies', payment.companyId), {
-                      planId: payment.planId,
-                      billingCycle: payment.billingCycle,
-                      subscriptionStatus: 'activa',
-                      subscriptionStartDate: today,
-                      subscriptionEndDate: newEndDate,
+                if (!isDemoMode && currentUser) {
+                  try {
+                    await updateDoc(doc(db, 'subscription_payments', payment.id), {
+                      status: decision,
+                      adminNotes: adminNotes.slice(0, 490),
+                      receiptNumber: generatedReceipt.slice(0, 75),
                       updatedAt: serverTimestamp(),
                     });
+                  } catch {
+                    // ignore
                   }
-
-                  await logAuditEvent(
-                    `VALIDACAO_PAGAMENTO_MCX_${decision.toUpperCase()}`,
-                    'Admin Central ALHAN',
-                    payment.orderReference,
-                    `Pagamento Multicaixa Express (${payment.transactionReference}) de ${payment.companyName} -> ${decision.toUpperCase()}.`
-                  );
-                } catch (err) {
-                  handleFirestoreError(
-                    err,
-                    OperationType.UPDATE,
-                    `subscription_payments/${payment.id}`
-                  );
                 }
+                void syncWithPermanentServerVault(companies);
               }}
               onRespondTicket={async (tkt, responseText, newStatus) => {
-                if (isDemoMode || !currentUser) {
-                  setTickets((prev) =>
-                    prev.map((t) =>
-                      t.id === tkt.id
-                        ? { ...t, adminResponse: responseText, status: newStatus }
-                        : t
-                    )
+                setTickets((prev) => {
+                  const next = prev.map((t) =>
+                    t.id === tkt.id
+                      ? { ...t, adminResponse: responseText, status: newStatus }
+                      : t
                   );
-                  return;
+                  savePermanentTickets(next);
+                  return next;
+                });
+                if (!isDemoMode && currentUser) {
+                  try {
+                    await updateDoc(doc(db, 'support_tickets', tkt.id), {
+                      adminResponse: responseText.slice(0, 1490),
+                      status: newStatus,
+                      updatedAt: serverTimestamp(),
+                    });
+                  } catch {
+                    // ignore
+                  }
                 }
-                try {
-                  await updateDoc(doc(db, 'support_tickets', tkt.id), {
-                    adminResponse: responseText.slice(0, 1490),
-                    status: newStatus,
-                    updatedAt: serverTimestamp(),
-                  });
-                } catch (err) {
-                  handleFirestoreError(err, OperationType.UPDATE, `support_tickets/${tkt.id}`);
-                }
+                void syncWithPermanentServerVault(companies);
               }}
               onBroadcastNotice={(title, message) => setGlobalNotice({ title, message })}
             />
@@ -3280,8 +3389,14 @@ export default function App() {
             companyId: activeCompany.id,
             ...paymentData,
           };
+          setSubscriptionPayments((prev) => {
+            const next = [newPayment, ...prev];
+            savePermanentPayments(next);
+            return next;
+          });
+          void syncWithPermanentServerVault(companies);
+
           if (isDemoMode || !currentUser) {
-            setSubscriptionPayments((prev) => [newPayment, ...prev]);
             await logAuditEvent(
               'SUBMETER_PAGAMENTO_MCX_EXPRESS',
               'Subscrições MCX',

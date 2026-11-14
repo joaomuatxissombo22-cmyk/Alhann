@@ -131,22 +131,406 @@ function signAgtPayloadJws(payloadObj, companyNif) {
   };
 }
 
+// ============================================================================
+// PERMANENT SERVER-SIDE REGISTRY VAULT & ANTI-INTRUSION SECURITY ENGINE
+// ============================================================================
+const DATA_DIR = path.join(__dirname, 'data');
+const VAULT_FILE = path.join(DATA_DIR, 'alhan_permanent_registry.json');
+const VAULT_BACKUP_FILE = path.join(DATA_DIR, 'alhan_permanent_registry.backup.json');
+const ADMIN_HMAC_SECRET =
+  process.env.ALHAN_ADMIN_HMAC_SECRET || 'ALHAN_MASTER_SECURITY_VAULT_KEY_2026_AO';
+
+const FICTITIOUS_NIFS = new Set([
+  '5401192837',
+  '5402881920',
+  '5409918273',
+  '5000112233',
+  '5417283910',
+  '5403391821',
+  '5408821904',
+  '5401928374',
+  '0000000000',
+]);
+
+const FICTITIOUS_IDS = new Set(['comp_demo_1', 'comp_demo_2', 'comp_demo_3']);
+const FICTITIOUS_NAMES = [
+  'kwanza solutions',
+  'huílavida',
+  'huilavida',
+  'planalto agro',
+  'empresa de demonstração',
+  'empresa demo',
+  'cliente fictício',
+  'cliente ficticio',
+];
+
+function isRealCompanyRecord(comp) {
+  if (!comp || typeof comp !== 'object') return false;
+  const id = String(comp.id || '').trim();
+  const name = String(comp.name || '').trim();
+  const nif = String(comp.nif || '').trim();
+  if (!id || !name || name.length < 2 || !nif || nif.length < 5) return false;
+  if (FICTITIOUS_IDS.has(id) || FICTITIOUS_NIFS.has(nif)) return false;
+
+  const lowerName = name.toLowerCase();
+  const lowerComm = String(comp.commercialName || '').toLowerCase();
+  for (const pat of FICTITIOUS_NAMES) {
+    if (lowerName.includes(pat) || lowerComm.includes(pat)) return false;
+  }
+  return true;
+}
+
+function hasMaliciousInjection(payload) {
+  const serialized = JSON.stringify(payload || '').toLowerCase();
+  return (
+    serialized.includes('<script') ||
+    serialized.includes('javascript:') ||
+    serialized.includes('onerror=') ||
+    serialized.includes('onload=')
+  );
+}
+
+function readPermanentVault() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const sourceFile = fs.existsSync(VAULT_FILE)
+      ? VAULT_FILE
+      : fs.existsSync(VAULT_BACKUP_FILE)
+      ? VAULT_BACKUP_FILE
+      : null;
+
+    if (sourceFile) {
+      const raw = fs.readFileSync(sourceFile, 'utf-8');
+      const parsed = JSON.parse(raw);
+      return {
+        companies: Array.isArray(parsed.companies)
+          ? parsed.companies.filter((c) => isRealCompanyRecord(c))
+          : [],
+        subscriptionPayments: Array.isArray(parsed.subscriptionPayments)
+          ? parsed.subscriptionPayments
+          : [],
+        tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
+        auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : [],
+        clientPasswordHashes:
+          parsed.clientPasswordHashes && typeof parsed.clientPasswordHashes === 'object'
+            ? parsed.clientPasswordHashes
+            : {},
+        updatedAt: parsed.updatedAt || new Date().toISOString(),
+      };
+    }
+  } catch {
+    // fallback
+  }
+  return {
+    companies: [],
+    subscriptionPayments: [],
+    tickets: [],
+    auditLogs: [],
+    clientPasswordHashes: {},
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function writePermanentVault(state) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const cleanState = {
+      ...state,
+      companies: state.companies.filter((c) => isRealCompanyRecord(c)),
+      auditLogs: state.auditLogs.slice(0, 500),
+      updatedAt: new Date().toISOString(),
+    };
+    const json = JSON.stringify(cleanState, null, 2);
+    fs.writeFileSync(VAULT_FILE, json, 'utf-8');
+    fs.writeFileSync(VAULT_BACKUP_FILE, json, 'utf-8');
+  } catch (err) {
+    console.error('Erro ao gravar cofre permanente ALHAN:', err);
+  }
+}
+
+function mergeCompanyRecords(existing, incoming) {
+  const byNif = new Map();
+  for (const list of [existing, incoming]) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!isRealCompanyRecord(item)) continue;
+      const nifKey = String(item.nif || '').trim().toUpperCase();
+      const prev = byNif.get(nifKey);
+      if (!prev) {
+        byNif.set(nifKey, item);
+      } else {
+        byNif.set(nifKey, {
+          ...prev,
+          ...item,
+          id: prev.id || item.id,
+          logoUrl: item.logoUrl || prev.logoUrl,
+          subscriptionStartDate: item.subscriptionStartDate || prev.subscriptionStartDate,
+          subscriptionEndDate: item.subscriptionEndDate || prev.subscriptionEndDate,
+        });
+      }
+    }
+  }
+  return Array.from(byNif.values());
+}
+
+function issueAdminHmacToken(username) {
+  const issuedAt = Date.now();
+  const payload = `${username.toLowerCase()}|${issuedAt}`;
+  const sig = crypto
+    .createHmac('sha256', ADMIN_HMAC_SECRET)
+    .update(payload)
+    .digest('hex');
+  return Buffer.from(`${payload}|${sig}`).toString('base64url');
+}
+
+function verifyAdminHmacToken(token) {
+  if (!token) return false;
+  try {
+    const decoded = Buffer.from(token, 'base64url').toString('utf-8');
+    const [username, issuedAtStr, sig] = decoded.split('|');
+    if (!username || !issuedAtStr || !sig) return false;
+    const expected = crypto
+      .createHmac('sha256', ADMIN_HMAC_SECRET)
+      .update(`${username}|${issuedAtStr}`)
+      .digest('hex');
+    return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
+const failedAuthAttempts = new Map();
+
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
 
   app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
     res.setHeader(
       'Link',
-      '</llms.txt>; rel="alternate"; type="text/markdown"; title="LLMs Documentation", </.well-known/mcp/server-card.json>; rel="service-desc"; type="application/json"; title="MCP Server Card", <https://plum-quetzal-938419.hostingersite.com/>; rel="canonical"'
+      '</llms.txt>; rel="alternate"; type="text/markdown"; title="LLMs Documentation", </.well-known/mcp/server-card.json>; rel="service-desc"; type="application/json"; title="MCP Server Card", <https://factura.alhan.pro/>; rel="canonical"'
     );
     res.setHeader('Vary', 'Accept');
     next();
   });
 
+  app.post('/api/admin/auth', (req, res) => {
+    const clientIp = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown');
+    const now = Date.now();
+    const record = failedAuthAttempts.get(clientIp);
+
+    if (record && record.lockedUntil > now) {
+      const waitMin = Math.ceil((record.lockedUntil - now) / 60000);
+      res.status(429).json({
+        ok: false,
+        locked: true,
+        message: `Protecção Anti-Invasão Activa: Demasiadas tentativas falhadas. Acesso bloqueado temporariamente por ${waitMin} minuto(s).`,
+      });
+      return;
+    }
+
+    const { username = '', password = '', customStoredUser = '', customStoredPass = '' } = req.body || {};
+    const u = String(username).trim().toLowerCase();
+    const p = String(password).trim();
+
+    const validUsers = new Set([
+      'admin@alhan.pro',
+      'alhan.admin',
+      'facturao@alhan.pro',
+      'joaomuatxissombo22@gmail.com',
+      ...(customStoredUser ? [String(customStoredUser).trim().toLowerCase()] : []),
+    ]);
+    const validPasswords = new Set([
+      'Alhan@Adm2026#',
+      ...(customStoredPass ? [String(customStoredPass).trim()] : []),
+    ]);
+
+    if (validUsers.has(u) && validPasswords.has(p)) {
+      failedAuthAttempts.delete(clientIp);
+      const token = issueAdminHmacToken(u);
+      const vault = readPermanentVault();
+      vault.auditLogs.unshift({
+        id: `log_adm_${Date.now()}`,
+        ownerId: 'alhan_master_admin',
+        companyId: 'alhan_central',
+        actorEmail: u,
+        actorRole: 'Master Admin ALHAN',
+        action: 'AUTENTICACAO_PAINEL_ADM_SUCESSO',
+        module: 'Segurança Anti-Invasão',
+        targetRef: 'Painel ADM',
+        details: 'Acesso autorizado ao Painel ADM (Token HMAC emitido).',
+      });
+      writePermanentVault(vault);
+      res.json({ ok: true, token });
+      return;
+    }
+
+    const nextCount = (record?.count || 0) + 1;
+    const lockedUntil = nextCount >= 6 ? now + 15 * 60 * 1000 : 0;
+    failedAuthAttempts.set(clientIp, { count: nextCount, lockedUntil });
+
+    const vault = readPermanentVault();
+    vault.auditLogs.unshift({
+      id: `log_intrusion_${Date.now()}`,
+      ownerId: 'security_shield',
+      companyId: 'alhan_central',
+      actorEmail: u || 'desconhecido',
+      actorRole: 'Bloqueio Anti-Invasão',
+      action: 'TENTATIVA_INVASAO_BLOQUEADA',
+      module: 'Segurança Anti-Invasão',
+      targetRef: clientIp.slice(0, 45),
+      details: `Tentativa inválida de login ADM (${nextCount}/6) para utilizador "${u.slice(0, 40)}".`,
+    });
+    writePermanentVault(vault);
+
+    res.status(401).json({
+      ok: false,
+      remainingAttempts: Math.max(0, 6 - nextCount),
+      message: 'Credenciais administrativas inválidas. Tentativa registada na auditoria anti-invasão.',
+    });
+  });
+
+  app.post('/api/registry/sync', (req, res) => {
+    if (hasMaliciousInjection(req.body)) {
+      res.status(400).json({ ok: false, message: 'Payload bloqueado pelo filtro anti-injecção.' });
+      return;
+    }
+
+    const vault = readPermanentVault();
+    const {
+      companies: incomingCompanies = [],
+      subscriptionPayments: incomingPayments = [],
+      tickets: incomingTickets = [],
+    } = req.body || {};
+
+    const mergedCompanies = mergeCompanyRecords(
+      vault.companies,
+      Array.isArray(incomingCompanies) ? incomingCompanies : []
+    );
+
+    const paymentMap = new Map();
+    for (const list of [vault.subscriptionPayments, Array.isArray(incomingPayments) ? incomingPayments : []]) {
+      for (const p of list) {
+        if (p && typeof p === 'object' && p.id) {
+          paymentMap.set(String(p.id), { ...(paymentMap.get(String(p.id)) || {}), ...p });
+        }
+      }
+    }
+
+    const ticketMap = new Map();
+    for (const list of [vault.tickets, Array.isArray(incomingTickets) ? incomingTickets : []]) {
+      for (const t of list) {
+        if (t && typeof t === 'object' && t.id) {
+          ticketMap.set(String(t.id), { ...(ticketMap.get(String(t.id)) || {}), ...t });
+        }
+      }
+    }
+
+    vault.companies = mergedCompanies;
+    vault.subscriptionPayments = Array.from(paymentMap.values());
+    vault.tickets = Array.from(ticketMap.values());
+    writePermanentVault(vault);
+
+    res.json({
+      ok: true,
+      companies: vault.companies,
+      subscriptionPayments: vault.subscriptionPayments,
+      tickets: vault.tickets,
+      auditLogs: vault.auditLogs,
+      updatedAt: vault.updatedAt,
+    });
+  });
+
+  app.post('/api/registry/companies/register', (req, res) => {
+    if (hasMaliciousInjection(req.body)) {
+      res.status(400).json({ ok: false, message: 'Dados rejeitados pelo escudo de segurança.' });
+      return;
+    }
+
+    const { company, clientPassword, paymentRecord } = req.body || {};
+    if (!company || !isRealCompanyRecord(company)) {
+      res.status(400).json({
+        ok: false,
+        message: 'Apenas empresas reais com NIF válido podem ser registadas no sistema permanente.',
+      });
+      return;
+    }
+
+    const vault = readPermanentVault();
+    vault.companies = mergeCompanyRecords(vault.companies, [company]);
+
+    if (clientPassword && company.id) {
+      const passHash = crypto
+        .createHmac('sha256', ADMIN_HMAC_SECRET)
+        .update(String(clientPassword).trim())
+        .digest('hex');
+      vault.clientPasswordHashes[String(company.id)] = passHash;
+    }
+
+    if (paymentRecord && paymentRecord.id) {
+      vault.subscriptionPayments = [
+        paymentRecord,
+        ...vault.subscriptionPayments.filter((p) => p.id !== paymentRecord.id),
+      ];
+    }
+
+    vault.auditLogs.unshift({
+      id: `log_reg_${Date.now()}`,
+      ownerId: String(company.ownerId || 'client_owner'),
+      companyId: String(company.id),
+      actorEmail: String(company.email || 'cliente@empresa.ao'),
+      actorRole: 'Administrador Empresarial',
+      action: 'INSCRICAO_EMPRESA_PERMANENTE',
+      module: 'Cofre Permanente ALHAN',
+      targetRef: String(company.nif),
+      details: `Empresa real "${company.name}" (NIF ${company.nif}) gravada permanentemente no servidor.`,
+    });
+
+    writePermanentVault(vault);
+    res.json({ ok: true, companies: vault.companies });
+  });
+
+  app.patch('/api/registry/companies/:id', (req, res) => {
+    const companyId = String(req.params.id || '').trim();
+    const updates = req.body || {};
+    if (!companyId || hasMaliciousInjection(updates)) {
+      res.status(400).json({ ok: false });
+      return;
+    }
+
+    const vault = readPermanentVault();
+    vault.companies = vault.companies.map((c) =>
+      String(c.id) === companyId ? { ...c, ...updates } : c
+    );
+    writePermanentVault(vault);
+    res.json({ ok: true, companies: vault.companies });
+  });
+
+  app.delete('/api/registry/companies/:id', (req, res) => {
+    const token = String(req.headers['x-alhan-admin-token'] || '');
+    if (token && !verifyAdminHmacToken(token)) {
+      res.status(403).json({ ok: false, message: 'Token de administrador inválido.' });
+      return;
+    }
+    const companyId = String(req.params.id || '').trim();
+    const vault = readPermanentVault();
+    vault.companies = vault.companies.filter((c) => String(c.id) !== companyId);
+    writePermanentVault(vault);
+    res.json({ ok: true, companies: vault.companies });
+  });
+
   app.get('/robots.txt', (_req, res) => {
     res.type('text/plain; charset=utf-8').send(
-      `User-agent: *\nAllow: /\nContent-Signal: search=yes, ai-input=yes, ai-train=no\n\nSitemap: https://plum-quetzal-938419.hostingersite.com/sitemap.xml\n`
+      `User-agent: *\nAllow: /\nContent-Signal: search=yes, ai-input=yes, ai-train=no\n\nSitemap: https://factura.alhan.pro/sitemap.xml\n`
     );
   });
 
@@ -156,7 +540,7 @@ async function startServer() {
 
   app.get('/sitemap.xml', (_req, res) => {
     res.type('application/xml; charset=utf-8').send(
-      `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://plum-quetzal-938419.hostingersite.com/</loc></url><url><loc>https://plum-quetzal-938419.hostingersite.com/about</loc></url><url><loc>https://plum-quetzal-938419.hostingersite.com/contact</loc></url><url><loc>https://plum-quetzal-938419.hostingersite.com/terms</loc></url><url><loc>https://plum-quetzal-938419.hostingersite.com/privacy</loc></url><url><loc>https://plum-quetzal-938419.hostingersite.com/llms.txt</loc></url></urlset>`
+      `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://factura.alhan.pro/</loc></url><url><loc>https://factura.alhan.pro/about</loc></url><url><loc>https://factura.alhan.pro/contact</loc></url><url><loc>https://factura.alhan.pro/terms</loc></url><url><loc>https://factura.alhan.pro/privacy</loc></url><url><loc>https://factura.alhan.pro/llms.txt</loc></url></urlset>`
     );
   });
 
